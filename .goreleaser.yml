@@ -35,3 +35,17 @@ nfpms:
     formats:
       - deb
       - rpm
+
+homebrew_casks:
+  - name: fya
+    ids:
+      - fya
+    repository:
+      owner: umputun
+      name: homebrew-apps
+    directory: Casks
+    homepage: https://github.com/umputun/fya
+    description: Claude Code print-mode wrapper backed by an interactive PTY session
+    license: MIT
+    binaries:
+      - fya
