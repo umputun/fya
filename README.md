@@ -1,4 +1,4 @@
-# fya <a href="https://github.com/umputun/fya/actions/workflows/ci.yml"><img src="https://github.com/umputun/fya/actions/workflows/ci.yml/badge.svg" alt="build"></a> <a href="https://goreportcard.com/report/github.com/umputun/fya"><img src="https://goreportcard.com/badge/github.com/umputun/fya" alt="Go Report Card"></a>
+# fya <a href="https://github.com/umputun/fya/actions/workflows/ci.yml"><img src="https://github.com/umputun/fya/actions/workflows/ci.yml/badge.svg" alt="build"></a> <a href="https://coveralls.io/github/umputun/fya?branch=master"><img src="https://coveralls.io/repos/github/umputun/fya/badge.svg?branch=master" alt="Coverage Status"></a> <a href="https://goreportcard.com/report/github.com/umputun/fya"><img src="https://goreportcard.com/badge/github.com/umputun/fya" alt="Go Report Card"></a>
 
 `fya` is a Claude Code print-mode wrapper backed by an interactive PTY session.
 
