@@ -25,8 +25,8 @@ import (
 //			WaitFunc: func() error {
 //				panic("mock out the Wait method")
 //			},
-//			WriteStringFunc: func(s string) error {
-//				panic("mock out the WriteString method")
+//			WriteFunc: func(p []byte) (int, error) {
+//				panic("mock out the Write method")
 //			},
 //		}
 //
@@ -47,8 +47,8 @@ type SessionMock struct {
 	// WaitFunc mocks the Wait method.
 	WaitFunc func() error
 
-	// WriteStringFunc mocks the WriteString method.
-	WriteStringFunc func(s string) error
+	// WriteFunc mocks the Write method.
+	WriteFunc func(p []byte) (int, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -64,17 +64,17 @@ type SessionMock struct {
 		// Wait holds details about calls to the Wait method.
 		Wait []struct {
 		}
-		// WriteString holds details about calls to the WriteString method.
-		WriteString []struct {
-			// S is the s argument value.
-			S string
+		// Write holds details about calls to the Write method.
+		Write []struct {
+			// P is the p argument value.
+			P []byte
 		}
 	}
-	lockClose       sync.RWMutex
-	lockDone        sync.RWMutex
-	lockOutput      sync.RWMutex
-	lockWait        sync.RWMutex
-	lockWriteString sync.RWMutex
+	lockClose  sync.RWMutex
+	lockDone   sync.RWMutex
+	lockOutput sync.RWMutex
+	lockWait   sync.RWMutex
+	lockWrite  sync.RWMutex
 }
 
 // Close calls CloseFunc.
@@ -185,34 +185,34 @@ func (mock *SessionMock) WaitCalls() []struct {
 	return calls
 }
 
-// WriteString calls WriteStringFunc.
-func (mock *SessionMock) WriteString(s string) error {
-	if mock.WriteStringFunc == nil {
-		panic("SessionMock.WriteStringFunc: method is nil but Session.WriteString was just called")
+// Write calls WriteFunc.
+func (mock *SessionMock) Write(p []byte) (int, error) {
+	if mock.WriteFunc == nil {
+		panic("SessionMock.WriteFunc: method is nil but Session.Write was just called")
 	}
 	callInfo := struct {
-		S string
+		P []byte
 	}{
-		S: s,
+		P: p,
 	}
-	mock.lockWriteString.Lock()
-	mock.calls.WriteString = append(mock.calls.WriteString, callInfo)
-	mock.lockWriteString.Unlock()
-	return mock.WriteStringFunc(s)
+	mock.lockWrite.Lock()
+	mock.calls.Write = append(mock.calls.Write, callInfo)
+	mock.lockWrite.Unlock()
+	return mock.WriteFunc(p)
 }
 
-// WriteStringCalls gets all the calls that were made to WriteString.
+// WriteCalls gets all the calls that were made to Write.
 // Check the length with:
 //
-//	len(mockedSession.WriteStringCalls())
-func (mock *SessionMock) WriteStringCalls() []struct {
-	S string
+//	len(mockedSession.WriteCalls())
+func (mock *SessionMock) WriteCalls() []struct {
+	P []byte
 } {
 	var calls []struct {
-		S string
+		P []byte
 	}
-	mock.lockWriteString.RLock()
-	calls = mock.calls.WriteString
-	mock.lockWriteString.RUnlock()
+	mock.lockWrite.RLock()
+	calls = mock.calls.Write
+	mock.lockWrite.RUnlock()
 	return calls
 }

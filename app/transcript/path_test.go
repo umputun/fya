@@ -32,7 +32,7 @@ func TestCatalogSelect(t *testing.T) {
 	got, err := cat.Select(cwd, now.Add(-time.Minute), "target prompt")
 
 	require.NoError(t, err)
-	assert.Equal(t, newPath, got.Path)
+	assert.Equal(t, newPath, got)
 }
 
 // when no transcript is fresh enough or matches the prompt, Select must NOT
@@ -87,7 +87,7 @@ func TestCatalogSelectJSONEscapedPrompt(t *testing.T) {
 	got, err := cat.Select(cwd, time.Now().Add(-time.Minute), "line1\nline2 \"quoted\"")
 
 	require.NoError(t, err)
-	assert.Equal(t, transcriptPath, got.Path)
+	assert.Equal(t, transcriptPath, got)
 }
 
 func TestCatalogSelectFreshButMissingPromptReturnsErrNoTranscript(t *testing.T) {

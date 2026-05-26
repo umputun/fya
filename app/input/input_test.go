@@ -29,7 +29,7 @@ func TestReadText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NewReader(Request{Args: tt.args, Stdin: strings.NewReader(tt.in), StdinHasData: tt.has, InputFormat: "text"}).Read()
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, got.Prompt)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -54,7 +54,7 @@ func TestReadStreamJSON(t *testing.T) {
 	got, err := NewReader(Request{Stdin: strings.NewReader(in), StdinHasData: true, InputFormat: "stream-json"}).Read()
 
 	require.NoError(t, err)
-	assert.Equal(t, "hello world", got.Prompt)
+	assert.Equal(t, "hello world", got)
 }
 
 func TestReadStreamJSONContentForms(t *testing.T) {
@@ -73,7 +73,7 @@ func TestReadStreamJSONContentForms(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NewReader(Request{Stdin: strings.NewReader(tt.in), StdinHasData: true, InputFormat: "stream-json"}).Read()
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, got.Prompt)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -100,7 +100,7 @@ func TestReadStreamJSONReplayUserMessages(t *testing.T) {
 	}).Read()
 
 	require.NoError(t, err)
-	assert.Equal(t, "hello", got.Prompt)
+	assert.Equal(t, "hello", got)
 	assert.Equal(t, raw+"\n", out.String()) //nolint:testifylint // need byte-exact replay including trailing newline, not JSON-equivalent.
 }
 

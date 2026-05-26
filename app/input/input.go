@@ -24,11 +24,6 @@ type Request struct {
 	ReplayUserMessages bool
 }
 
-// Result holds the resolved prompt text.
-type Result struct {
-	Prompt string
-}
-
 // Reader resolves a prompt from a Request, picking the correct parsing path
 // based on the configured input format.
 type Reader struct {
@@ -42,55 +37,55 @@ func NewReader(req Request) *Reader {
 
 // Read returns the resolved prompt. In stream-json mode exactly one user
 // message is accepted; multiple user messages are rejected per the v1 contract.
-func (r *Reader) Read() (Result, error) {
+func (r *Reader) Read() (string, error) {
 	switch r.req.InputFormat {
 	case "", "text":
 		return r.readText()
 	case "stream-json":
 		return r.readStreamJSON()
 	default:
-		return Result{}, fmt.Errorf("unsupported input format: %s", r.req.InputFormat)
+		return "", fmt.Errorf("unsupported input format: %s", r.req.InputFormat)
 	}
 }
 
-func (r *Reader) readText() (Result, error) {
+func (r *Reader) readText() (string, error) {
 	prompt := strings.Join(r.req.Args, " ")
 	if r.req.StdinHasData {
 		data, err := io.ReadAll(r.req.Stdin)
 		if err != nil {
-			return Result{}, fmt.Errorf("read prompt: %w", err)
+			return "", fmt.Errorf("read prompt: %w", err)
 		}
 		if len(data) > 0 {
 			prompt = strings.TrimRight(string(data), "\r\n")
 		}
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return Result{}, ErrEmptyPrompt
+		return "", ErrEmptyPrompt
 	}
-	return Result{Prompt: prompt}, nil
+	return prompt, nil
 }
 
-func (r *Reader) readStreamJSON() (Result, error) {
+func (r *Reader) readStreamJSON() (string, error) {
 	if !r.req.StdinHasData {
-		return Result{}, errors.New("stream-json input requires stdin")
+		return "", errors.New("stream-json input requires stdin")
 	}
 	data, err := io.ReadAll(r.req.Stdin)
 	if err != nil {
-		return Result{}, fmt.Errorf("read stream-json input: %w", err)
+		return "", fmt.Errorf("read stream-json input: %w", err)
 	}
 	userPrompt, rawUserLine, err := newStreamJSONParser(string(data)).extractSingleUserPrompt()
 	if err != nil {
-		return Result{}, err
+		return "", err
 	}
 	if r.req.ReplayUserMessages {
 		if r.req.Stdout == nil {
-			return Result{}, errors.New("replay user messages requires stdout")
+			return "", errors.New("replay user messages requires stdout")
 		}
 		if _, err := fmt.Fprintln(r.req.Stdout, rawUserLine); err != nil {
-			return Result{}, fmt.Errorf("replay user message: %w", err)
+			return "", fmt.Errorf("replay user message: %w", err)
 		}
 	}
-	return Result{Prompt: userPrompt}, nil
+	return userPrompt, nil
 }
 
 type streamJSONParser struct {

@@ -19,9 +19,9 @@ type Tailer struct {
 	parser *parser
 }
 
-// NewTailer returns a Tailer pointed at path starting from offset.
-func NewTailer(path string, offset int64) *Tailer {
-	return &Tailer{path: path, offset: offset, parser: newParser()}
+// NewTailer returns a Tailer pointed at path.
+func NewTailer(path string) *Tailer {
+	return &Tailer{path: path, parser: newParser()}
 }
 
 // ReadNew opens the transcript file, reads from the current offset to EOF, and

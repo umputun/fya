@@ -6,8 +6,6 @@ package mocks
 import (
 	"sync"
 	"time"
-
-	"github.com/umputun/fya/app/transcript"
 )
 
 // CatalogMock is a mock implementation of turn.Catalog.
@@ -16,7 +14,7 @@ import (
 //
 //		// make and configure a mocked turn.Catalog
 //		mockedCatalog := &CatalogMock{
-//			SelectFunc: func(cwd string, since time.Time, prompt string) (transcript.Candidate, error) {
+//			SelectFunc: func(cwd string, since time.Time, prompt string) (string, error) {
 //				panic("mock out the Select method")
 //			},
 //		}
@@ -27,7 +25,7 @@ import (
 //	}
 type CatalogMock struct {
 	// SelectFunc mocks the Select method.
-	SelectFunc func(cwd string, since time.Time, prompt string) (transcript.Candidate, error)
+	SelectFunc func(cwd string, since time.Time, prompt string) (string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -45,7 +43,7 @@ type CatalogMock struct {
 }
 
 // Select calls SelectFunc.
-func (mock *CatalogMock) Select(cwd string, since time.Time, prompt string) (transcript.Candidate, error) {
+func (mock *CatalogMock) Select(cwd string, since time.Time, prompt string) (string, error) {
 	if mock.SelectFunc == nil {
 		panic("CatalogMock.SelectFunc: method is nil but Catalog.Select was just called")
 	}

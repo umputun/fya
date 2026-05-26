@@ -46,9 +46,11 @@ func defaultTurnRunner(stdout, stderr io.Writer, cfg options.Config) turnExecuto
 			TurnTimeout: cfg.TurnTimeout,
 			Warn:        stderr,
 		}),
-		Catalog:       transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
-		TailerFactory: turn.NewTailerFactory(),
-		Output:        output,
+		Catalog: transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
+		TailerFactory: func(path string) turn.Tailer {
+			return transcript.NewTailer(path)
+		},
+		Output: output,
 	})
 }
 
@@ -112,7 +114,7 @@ func execute(parent context.Context, req request) error {
 }
 
 func run(ctx context.Context, cfg options.Config, req request) error {
-	promptInput, err := input.NewReader(input.Request{
+	prompt, err := input.NewReader(input.Request{
 		Args:               cfg.PromptArgs,
 		Stdin:              req.Stdin,
 		StdinHasData:       stdinHasData(req.Stdin),
@@ -129,7 +131,7 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		CWD:         cfg.CWD,
 		TurnTimeout: cfg.TurnTimeout,
 		IdleTimeout: cfg.IdleTimeout,
-		Prompt:      promptInput.Prompt,
+		Prompt:      prompt,
 	}); err != nil {
 		return fmt.Errorf("run turn: %w", err)
 	}

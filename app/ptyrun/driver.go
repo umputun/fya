@@ -169,14 +169,6 @@ func (Config) isPrivateEnvKey(key string) bool {
 		key == "_"
 }
 
-// PID returns the OS process id or 0 if the process is not running.
-func (p *Process) PID() int {
-	if p == nil || p.cmd == nil || p.cmd.Process == nil {
-		return 0
-	}
-	return p.cmd.Process.Pid
-}
-
 // Write sends raw bytes to the PTY master so the wrapped command sees them as
 // input. Returns an error if the process is not started.
 func (p *Process) Write(data []byte) (int, error) {
@@ -188,12 +180,6 @@ func (p *Process) Write(data []byte) (int, error) {
 		return n, fmt.Errorf("write pty: %w", err)
 	}
 	return n, nil
-}
-
-// WriteString is a convenience wrapper that forwards to Write([]byte(s)).
-func (p *Process) WriteString(s string) error {
-	_, err := p.Write([]byte(s))
-	return err
 }
 
 // Output returns a snapshot of the captured terminal output up to BufferLimit.
@@ -249,7 +235,7 @@ func (p *Process) closeWithGrace(closeGrace, termGrace time.Duration) error {
 	}
 
 	var errs []error
-	if err := p.WriteString(ctrlC); err != nil {
+	if _, err := p.Write([]byte(ctrlC)); err != nil {
 		errs = append(errs, fmt.Errorf("send ctrl-c: %w", err))
 	}
 	if p.waitForExit(closeGrace) {

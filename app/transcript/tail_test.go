@@ -16,7 +16,7 @@ func TestTailerReadsLargeLinesAndOffsets(t *testing.T) {
 	content := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"` + large + `"}]}}` + "\n"
 	content += `{"type":"result","result":"done"}` + "\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-	tailer := NewTailer(path, 0)
+	tailer := NewTailer(path)
 
 	events, err := tailer.ReadNew()
 
@@ -34,7 +34,7 @@ func TestTailerPartialLineSafe(t *testing.T) {
 	first := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}` + "\n"
 	prefix := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text",`
 	require.NoError(t, os.WriteFile(path, []byte(first+prefix), 0o600))
-	tailer := NewTailer(path, 0)
+	tailer := NewTailer(path)
 
 	events, err := tailer.ReadNew()
 

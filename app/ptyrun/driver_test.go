@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -41,10 +40,11 @@ func TestOutputDraining(t *testing.T) {
 	assert.Contains(t, got, "world")
 }
 
-func TestWriteString(t *testing.T) {
+func TestWrite(t *testing.T) {
 	p := startHelper(t, "read")
 
-	require.NoError(t, p.WriteString("hello\n"))
+	_, err := p.Write([]byte("hello\n"))
+	require.NoError(t, err)
 	require.NoError(t, p.Wait())
 	assert.Contains(t, p.Output(), "got:hello")
 }
@@ -162,14 +162,12 @@ func TestConfigDefaults(t *testing.T) {
 func TestProcessNilSafeMethods(t *testing.T) {
 	var p *Process
 
-	assert.Equal(t, 0, p.PID())
 	assert.Empty(t, p.Output())
 	require.NoError(t, p.Close())
 	require.NoError(t, p.Kill())
 
 	_, err := p.Write([]byte("x"))
 	require.Error(t, err)
-	require.Error(t, p.WriteString("x"))
 	require.Error(t, p.Wait())
 }
 
@@ -200,7 +198,6 @@ func TestProcessKillWithoutProcess(t *testing.T) {
 
 func TestProcessMethodsWithoutLivePTY(t *testing.T) {
 	p := &Process{
-		cmd:       &exec.Cmd{Process: &os.Process{Pid: 123}},
 		output:    &tailBuffer{data: make([]byte, 0, 32), limit: 32},
 		waitDone:  make(chan error, 1),
 		drainDone: make(chan struct{}),
@@ -211,7 +208,6 @@ func TestProcessMethodsWithoutLivePTY(t *testing.T) {
 	close(p.drainDone)
 	close(p.exited)
 
-	assert.Equal(t, 123, p.PID())
 	assert.Equal(t, "captured", p.Output())
 	assert.NoError(t, p.Wait())
 }

@@ -41,7 +41,6 @@ type Writer struct {
 	cfg    Config
 	out    io.Writer
 	text   strings.Builder
-	turns  int
 	closed bool
 }
 
@@ -84,7 +83,6 @@ func (w *Writer) Final(result Result) error {
 		return nil
 	}
 	w.closed = true
-	w.turns++
 	if result.Subtype == "" {
 		result.Subtype = "success"
 	}
@@ -92,7 +90,7 @@ func (w *Writer) Final(result Result) error {
 		result.TerminalReason = "end_turn"
 	}
 	if result.NumTurns == 0 {
-		result.NumTurns = w.turns
+		result.NumTurns = 1
 	}
 	if result.SessionID == "" {
 		result.SessionID = w.cfg.SessionID

@@ -28,11 +28,10 @@ type Catalog struct {
 	root string
 }
 
-// Candidate is one transcript JSONL file with its modification metadata.
-type Candidate struct {
-	Path    string
-	ModTime time.Time
-	Size    int64
+// candidate is one transcript JSONL file with its modification metadata.
+type candidate struct {
+	path    string
+	modTime time.Time
 }
 
 // NewCatalog returns a Catalog rooted at the given Claude config dir. An empty
@@ -59,7 +58,7 @@ func (c *Catalog) projectDir(cwd string) (string, error) {
 // sorted by modification time newest-first. A missing project directory (Claude
 // has not yet created it for this cwd) is returned as an empty list with no
 // error so selectors can retry until the first transcript appears.
-func (c *Catalog) candidates(cwd string) ([]Candidate, error) {
+func (c *Catalog) candidates(cwd string) ([]candidate, error) {
 	dir, err := c.projectDir(cwd)
 	if err != nil {
 		return nil, err
@@ -71,7 +70,7 @@ func (c *Catalog) candidates(cwd string) ([]Candidate, error) {
 		}
 		return nil, fmt.Errorf("read transcript dir: %w", err)
 	}
-	candidates := make([]Candidate, 0, len(entries))
+	candidates := make([]candidate, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
 			continue
@@ -80,14 +79,13 @@ func (c *Catalog) candidates(cwd string) ([]Candidate, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stat transcript: %w", err)
 		}
-		candidates = append(candidates, Candidate{
-			Path:    filepath.Join(dir, entry.Name()),
-			ModTime: info.ModTime(),
-			Size:    info.Size(),
+		candidates = append(candidates, candidate{
+			path:    filepath.Join(dir, entry.Name()),
+			modTime: info.ModTime(),
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].ModTime.After(candidates[j].ModTime)
+		return candidates[i].modTime.After(candidates[j].modTime)
 	})
 	return candidates, nil
 }
@@ -101,28 +99,28 @@ func (c *Catalog) candidates(cwd string) ([]Candidate, error) {
 // a JSON-encoded string: a raw search ("hello world") and a JSON-string-encoded
 // search ("hello \"world\"") so prompts with quotes, backslashes, or newlines
 // still match.
-func (c *Catalog) Select(cwd string, since time.Time, prompt string) (Candidate, error) {
+func (c *Catalog) Select(cwd string, since time.Time, prompt string) (string, error) {
 	candidates, err := c.candidates(cwd)
 	if err != nil {
-		return Candidate{}, err
+		return "", err
 	}
 	forms := c.promptForms(prompt)
 	for _, candidate := range candidates {
-		if candidate.ModTime.Before(since) {
+		if candidate.modTime.Before(since) {
 			continue
 		}
 		if prompt == "" {
-			return candidate, nil
+			return candidate.path, nil
 		}
-		matches, err := c.fileContainsAny(candidate.Path, forms)
+		matches, err := c.fileContainsAny(candidate.path, forms)
 		if err != nil {
-			return Candidate{}, fmt.Errorf("scan transcript %s: %w", candidate.Path, err)
+			return "", fmt.Errorf("scan transcript %s: %w", candidate.path, err)
 		}
 		if matches {
-			return candidate, nil
+			return candidate.path, nil
 		}
 	}
-	return Candidate{}, ErrNoTranscript
+	return "", ErrNoTranscript
 }
 
 // promptForms returns the raw prompt plus its JSON-string-encoded form (minus
@@ -180,7 +178,7 @@ func (*Catalog) fileContainsAny(path string, needles []string) (bool, error) {
 			maxLen = len(needleBytes[i])
 		}
 	}
-	overlap := max(maxLen, 256) // floor at 256 preserves the historical minimum window.
+	overlap := maxLen
 	reader := bufio.NewReaderSize(f, 64*1024)
 	tail := make([]byte, 0, overlap)
 	buf := make([]byte, 32*1024)
