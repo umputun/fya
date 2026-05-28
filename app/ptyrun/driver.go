@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +83,7 @@ func (d *Driver) Start(ctx context.Context) (*Process, error) {
 	cmd.Dir = d.cfg.Dir
 	cmd.Env = d.cfg.filteredEnv(cmd.Environ())
 
-	tty, err := startPTY(cmd, d.cfg.Rows, d.cfg.Cols)
+	tty, err := d.startPTY(cmd, d.cfg.Rows, d.cfg.Cols)
 	if err != nil {
 		return nil, fmt.Errorf("start pty command %q: %w", d.cfg.Command, err)
 	}
@@ -114,6 +115,10 @@ func (c Config) withDefaults() Config {
 	}
 	if c.BufferLimit <= 0 {
 		c.BufferLimit = defaultBufferLimit
+	}
+	c.Args = slices.Clone(c.Args)
+	if c.Env != nil {
+		c.Env = slices.Clone(c.Env)
 	}
 	return c
 }
@@ -242,7 +247,7 @@ func (p *Process) closeWithGrace(closeGrace, termGrace time.Duration) error {
 		return errors.Join(errs...)
 	}
 
-	if err := terminateProcessGroup(p.cmd.Process); err != nil {
+	if err := p.terminateProcessGroup(); err != nil {
 		errs = append(errs, fmt.Errorf("terminate pty command: %w", err))
 	}
 	if p.waitForExit(termGrace) {
@@ -284,7 +289,7 @@ func (p *Process) Kill() error {
 		return nil
 	}
 	p.killOnce.Do(func() {
-		p.killErr = killProcessGroup(p.cmd.Process)
+		p.killErr = p.killProcessGroup()
 	})
 	if p.killErr != nil {
 		return fmt.Errorf("kill pty command: %w", p.killErr)

@@ -159,6 +159,24 @@ func TestConfigDefaults(t *testing.T) {
 	assert.Equal(t, defaultBufferLimit, cfg.BufferLimit)
 }
 
+func TestConfigDefaultsCopiesSlices(t *testing.T) {
+	args := []string{"--verbose"}
+	env := []string{"A=1"}
+	cfg := Config{Args: args, Env: env}.withDefaults()
+	args[0] = "--mutated"
+	env[0] = "A=mutated"
+
+	assert.Equal(t, []string{"--verbose"}, cfg.Args)
+	assert.Equal(t, []string{"A=1"}, cfg.Env)
+}
+
+func TestConfigDefaultsPreservesExplicitEmptyEnv(t *testing.T) {
+	cfg := Config{Env: []string{}}.withDefaults()
+
+	assert.NotNil(t, cfg.Env)
+	assert.Empty(t, cfg.filteredEnv([]string{"SHOULD_NOT_INHERIT=1"}))
+}
+
 func TestProcessNilSafeMethods(t *testing.T) {
 	var p *Process
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 )
@@ -189,6 +190,8 @@ func (c Config) withDefaults() Config {
 			"│> ",
 			"? for shortcuts",
 		}
+	} else {
+		c.Glyphs = slices.Clone(c.Glyphs)
 	}
 	if c.BlockingPrompts == nil {
 		// known Claude Code dialogs that LOOK stable (so the quiet-period would
@@ -197,6 +200,8 @@ func (c Config) withDefaults() Config {
 		c.BlockingPrompts = []string{
 			"Do you trust the files in this folder?",
 		}
+	} else {
+		c.BlockingPrompts = slices.Clone(c.BlockingPrompts)
 	}
 	return c
 }

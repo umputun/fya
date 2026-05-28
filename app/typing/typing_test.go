@@ -39,7 +39,9 @@ func TestTypePrompt(t *testing.T) {
 	sleep := &fakeSleeper{}
 	var out bytes.Buffer
 
-	err := NewInjector(Config{WPM: 100, Jitter: -1, SettleDelay: time.Millisecond, Sleeper: sleep}).Type(t.Context(), &out, "hi")
+	err := NewInjector(Config{
+		WPM: 100, Jitter: -1, SettleDelay: time.Millisecond, Sleeper: sleep.sleep,
+	}).Type(t.Context(), &out, "hi")
 
 	require.NoError(t, err)
 	assert.Equal(t, "hi\r", out.String())
@@ -50,17 +52,18 @@ func TestTypeMultilinePrompt(t *testing.T) {
 	sleep := &fakeSleeper{}
 	var out bytes.Buffer
 
-	err := NewInjector(Config{Jitter: -1, Sleeper: sleep}).Type(t.Context(), &out, "a\nb")
+	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), &out, "a\nb")
 
 	require.NoError(t, err)
 	assert.Equal(t, "a\x1b\rb\r", out.String())
 }
 
 func TestJitterBounds(t *testing.T) {
+	jitter := &sequenceJitter{values: []float64{0, 1, 0.5}}
 	injector := NewInjector(Config{
 		WPM:    100,
 		Jitter: 0.25,
-		Rand:   &sequenceJitter{values: []float64{0, 1, 0.5}},
+		Rand:   jitter.next,
 	})
 
 	assert.Equal(t, 90*time.Millisecond, injector.jitteredDelay(), "Rand=0 → base - spread")
@@ -71,19 +74,27 @@ func TestJitterBounds(t *testing.T) {
 // explicit Jitter=0 must produce the base per-rune delay with no random offset,
 // proving the flag --typing-jitter=0 actually disables jitter at runtime.
 func TestJitterZeroHonored(t *testing.T) {
+	jitter := &sequenceJitter{values: []float64{0.999}}
 	injector := NewInjector(Config{
 		WPM:    100,
 		Jitter: 0,
-		Rand:   &sequenceJitter{values: []float64{0.999}}, // would shift if jitter applied
+		Rand:   jitter.next, // would shift if jitter applied
 	})
 
 	assert.Equal(t, 120*time.Millisecond, injector.jitteredDelay(), "Jitter=0 must disable jitter")
 }
 
+func TestDefaultJitterFunction(t *testing.T) {
+	got := NewInjector(Config{WPM: 100, Jitter: 0.25}).jitteredDelay()
+
+	assert.True(t, got >= 90*time.Millisecond && got <= 150*time.Millisecond, "default jitter delay out of range: %s", got)
+}
+
 func TestTypeRuneWriteError(t *testing.T) {
 	w := &errWriter{failAfter: 0}
+	sleep := &fakeSleeper{}
 
-	err := NewInjector(Config{Jitter: -1, Sleeper: &fakeSleeper{}}).Type(t.Context(), w, "x")
+	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), w, "x")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write prompt rune")
@@ -91,8 +102,9 @@ func TestTypeRuneWriteError(t *testing.T) {
 
 func TestTypeNewlineWriteError(t *testing.T) {
 	w := &errWriter{failAfter: 0}
+	sleep := &fakeSleeper{}
 
-	err := NewInjector(Config{Jitter: -1, Sleeper: &fakeSleeper{}}).Type(t.Context(), w, "\n")
+	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), w, "\n")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write multiline newline")
@@ -100,18 +112,32 @@ func TestTypeNewlineWriteError(t *testing.T) {
 
 func TestTypeSubmitWriteError(t *testing.T) {
 	w := &errWriter{failAfter: 1}
+	sleep := &fakeSleeper{}
 
-	err := NewInjector(Config{Jitter: -1, Sleeper: &fakeSleeper{}}).Type(t.Context(), w, "x")
+	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), w, "x")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "submit prompt")
 }
 
 func TestTypeDelayCancellation(t *testing.T) {
-	err := NewInjector(Config{Sleeper: cancelSleeper{}}).Type(t.Context(), &bytes.Buffer{}, "x")
+	err := NewInjector(Config{Sleeper: cancelSleep}).Type(t.Context(), &bytes.Buffer{}, "x")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "typing delay")
+}
+
+func TestDefaultSleeperFunctionHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var out bytes.Buffer
+
+	err := NewInjector(Config{}).Type(ctx, &out, "")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settle delay")
+	assert.Contains(t, err.Error(), "context canceled")
+	assert.Empty(t, out.String())
 }
 
 func TestTypeNilWriter(t *testing.T) {
@@ -124,14 +150,12 @@ type fakeSleeper struct {
 	delays []time.Duration
 }
 
-func (s *fakeSleeper) Sleep(_ context.Context, d time.Duration) error {
+func (s *fakeSleeper) sleep(_ context.Context, d time.Duration) error {
 	s.delays = append(s.delays, d)
 	return nil
 }
 
-type cancelSleeper struct{}
-
-func (cancelSleeper) Sleep(context.Context, time.Duration) error {
+func cancelSleep(context.Context, time.Duration) error {
 	return context.Canceled
 }
 
@@ -140,7 +164,7 @@ type sequenceJitter struct {
 	idx    int
 }
 
-func (j *sequenceJitter) Float64() float64 {
+func (j *sequenceJitter) next() float64 {
 	if j.idx >= len(j.values) {
 		return 0.5
 	}

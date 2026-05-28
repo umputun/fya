@@ -12,7 +12,7 @@ import (
 	"github.com/creack/pty"
 )
 
-func startPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
+func (*Driver) startPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
 	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, fmt.Errorf("start pty: %w", err)
@@ -24,10 +24,11 @@ func startPTY(cmd *exec.Cmd, rows, cols uint16) (*os.File, error) {
 // group is already gone it returns nil; if the group-kill fails for some other
 // reason it falls back to killing just the leader and wraps the original error
 // when the fallback also fails.
-func killProcessGroup(process *os.Process) error {
-	if process == nil {
+func (p *Process) killProcessGroup() error {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
+	process := p.cmd.Process
 	groupErr := syscall.Kill(-process.Pid, syscall.SIGKILL)
 	if groupErr == nil {
 		return nil
@@ -41,10 +42,11 @@ func killProcessGroup(process *os.Process) error {
 	return nil
 }
 
-func terminateProcessGroup(process *os.Process) error {
-	if process == nil {
+func (p *Process) terminateProcessGroup() error {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
+	process := p.cmd.Process
 	groupErr := syscall.Kill(-process.Pid, syscall.SIGTERM)
 	if groupErr == nil {
 		return nil

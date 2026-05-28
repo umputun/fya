@@ -21,7 +21,7 @@ type Tailer struct {
 
 // NewTailer returns a Tailer pointed at path.
 func NewTailer(path string) *Tailer {
-	return &Tailer{path: path, parser: newParser()}
+	return &Tailer{path: path, parser: &parser{}}
 }
 
 // ReadNew opens the transcript file, reads from the current offset to EOF, and

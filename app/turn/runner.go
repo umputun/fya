@@ -163,7 +163,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 		}
 		return err
 	}
-	return r.streamTranscript(ctx, cfg, session, r.tailers(path))
+	return r.streamTranscript(ctx, streamRequest{cfg: cfg, session: session, tailer: r.tailers(path)})
 }
 
 func (r *Runner) cleanupSession(session Session) {
@@ -201,17 +201,23 @@ func (r *Runner) selectTranscript(ctx context.Context, cfg Config, sessionDone <
 	}
 }
 
-func (r *Runner) streamTranscript(ctx context.Context, cfg Config, session Session, tailer Tailer) error {
+type streamRequest struct {
+	cfg     Config
+	session Session
+	tailer  Tailer
+}
+
+func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error {
 	tracker := transcript.NewTracker()
-	completion := transcript.Completion{IdleTimeout: cfg.IdleTimeout}
-	ticker := time.NewTicker(cfg.PollPeriod)
+	completion := transcript.Completion{IdleTimeout: req.cfg.IdleTimeout}
+	ticker := time.NewTicker(req.cfg.PollPeriod)
 	defer ticker.Stop()
-	sessionDone := session.Done()
+	sessionDone := req.session.Done()
 	lastEventAt := time.Now()
 	var lastEvent transcript.Event
 
 	for {
-		events, err := tailer.ReadNew()
+		events, err := req.tailer.ReadNew()
 		if err != nil {
 			if finalErr := r.output.Final(stream.Result{SessionID: lastEvent.SessionID, IsError: true, Subtype: "error"}); finalErr != nil {
 				return fmt.Errorf("write final output: %w", finalErr)
@@ -242,7 +248,7 @@ func (r *Runner) streamTranscript(ctx context.Context, cfg Config, session Sessi
 			}
 			return fmt.Errorf("turn canceled: %w", ctx.Err())
 		case <-sessionDone:
-			return r.handleSessionExit(ctx, tailer, state)
+			return r.handleSessionExit(ctx, req.tailer, state)
 		case <-ticker.C:
 		}
 	}

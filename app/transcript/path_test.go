@@ -10,8 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEncodeProjectPath(t *testing.T) {
-	assert.Equal(t, "-Users-me-dev-fya", encodeProjectPath("/Users/me/dev/fya"))
+func TestCatalogEncodeProjectPath(t *testing.T) {
+	cat := Catalog{}
+
+	assert.Equal(t, "-Users-me-dev-fya", cat.encodeProjectPath("/Users/me/dev/fya"))
 }
 
 func TestCatalogSelect(t *testing.T) {
@@ -26,8 +28,8 @@ func TestCatalogSelect(t *testing.T) {
 	require.NoError(t, os.WriteFile(oldPath, []byte("old prompt"), 0o600))
 	require.NoError(t, os.WriteFile(newPath, []byte("target prompt"), 0o600))
 	now := time.Now()
-	_ = os.Chtimes(oldPath, now.Add(-time.Hour), now.Add(-time.Hour))
-	_ = os.Chtimes(newPath, now, now)
+	require.NoError(t, os.Chtimes(oldPath, now.Add(-time.Hour), now.Add(-time.Hour)))
+	require.NoError(t, os.Chtimes(newPath, now, now))
 
 	got, err := cat.Select(cwd, now.Add(-time.Minute), "target prompt")
 
@@ -48,7 +50,7 @@ func TestCatalogSelectNoStaleFallback(t *testing.T) {
 	stalePath := filepath.Join(dir, "stale.jsonl")
 	require.NoError(t, os.WriteFile(stalePath, []byte("anything"), 0o600))
 	now := time.Now()
-	_ = os.Chtimes(stalePath, now.Add(-time.Hour), now.Add(-time.Hour))
+	require.NoError(t, os.Chtimes(stalePath, now.Add(-time.Hour), now.Add(-time.Hour)))
 
 	_, err = cat.Select(cwd, now.Add(-time.Minute), "fresh prompt")
 

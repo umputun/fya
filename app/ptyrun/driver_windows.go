@@ -7,17 +7,17 @@ import (
 	"os/exec"
 )
 
-func startPTY(_ *exec.Cmd, _, _ uint16) (*os.File, error) {
+func (*Driver) startPTY(_ *exec.Cmd, _, _ uint16) (*os.File, error) {
 	return nil, ErrUnsupported
 }
 
-func killProcessGroup(process *os.Process) error {
-	if process == nil {
+func (p *Process) killProcessGroup() error {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
-	return process.Kill()
+	return p.cmd.Process.Kill()
 }
 
-func terminateProcessGroup(process *os.Process) error {
-	return killProcessGroup(process)
+func (p *Process) terminateProcessGroup() error {
+	return p.killProcessGroup()
 }

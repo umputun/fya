@@ -9,5 +9,7 @@ import (
 )
 
 func TestKillProcessGroupNil(t *testing.T) {
-	assert.NoError(t, killProcessGroup(nil))
+	var p *Process
+
+	assert.NoError(t, p.killProcessGroup())
 }
