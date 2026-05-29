@@ -21,17 +21,13 @@ const (
 	submitEnter          = "\r"
 )
 
-// Sleeper waits for d or until ctx is canceled; the real implementation uses
+// SleepFunc waits for d or until ctx is canceled; the real implementation uses
 // time.NewTimer with ctx.Done() select.
-type Sleeper interface {
-	Sleep(ctx context.Context, d time.Duration) error
-}
+type SleepFunc func(ctx context.Context, d time.Duration) error
 
-// Jitter returns a uniform random float in [0, 1) used to add variation to the
-// per-rune typing delay.
-type Jitter interface {
-	Float64() float64
-}
+// JitterFunc returns a uniform random float in [0, 1) used to add variation to
+// the per-rune typing delay.
+type JitterFunc func() float64
 
 // Config configures an Injector. Zero values get sensible defaults except for
 // Jitter, where 0 means "no jitter" and a negative value is treated as 0.
@@ -46,8 +42,8 @@ type Config struct {
 	// and always types.
 	MaxWPMSize int
 	Warn       io.Writer
-	Sleeper    Sleeper
-	Rand       Jitter
+	Sleeper    SleepFunc
+	Rand       JitterFunc
 }
 
 // estimate captures the expected duration of typing a prompt with current settings.
@@ -109,11 +105,11 @@ func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 		if err := i.writeRune(w, r); err != nil {
 			return err
 		}
-		if err := i.cfg.Sleeper.Sleep(ctx, i.jitteredDelay()); err != nil {
+		if err := i.cfg.Sleeper(ctx, i.jitteredDelay()); err != nil {
 			return fmt.Errorf("typing delay: %w", err)
 		}
 	}
-	if err := i.cfg.Sleeper.Sleep(ctx, i.cfg.SettleDelay); err != nil {
+	if err := i.cfg.Sleeper(ctx, i.cfg.SettleDelay); err != nil {
 		return fmt.Errorf("settle delay: %w", err)
 	}
 	if _, err := io.WriteString(w, submitEnter); err != nil {
@@ -140,7 +136,7 @@ func (i *Injector) paste(ctx context.Context, w io.Writer, prompt string) error 
 	if _, err := io.WriteString(w, body); err != nil {
 		return fmt.Errorf("paste prompt: %w", err)
 	}
-	if err := i.cfg.Sleeper.Sleep(ctx, i.cfg.SettleDelay); err != nil {
+	if err := i.cfg.Sleeper(ctx, i.cfg.SettleDelay); err != nil {
 		return fmt.Errorf("settle delay: %w", err)
 	}
 	if _, err := io.WriteString(w, submitEnter); err != nil {
@@ -176,7 +172,7 @@ func (i *Injector) jitteredDelay() time.Duration {
 		return base
 	}
 	spread := float64(base) * i.cfg.Jitter
-	factor := i.cfg.Rand.Float64()*2 - 1
+	factor := i.cfg.Rand()*2 - 1
 	delay := float64(base) + spread*factor
 	if delay < 0 {
 		return 0
@@ -204,17 +200,15 @@ func (c Config) withDefaults() Config {
 		c.MaxWPMSize = 0
 	}
 	if c.Sleeper == nil {
-		c.Sleeper = realSleeper{}
+		c.Sleeper = c.realSleep
 	}
 	if c.Rand == nil {
-		c.Rand = randJitter{}
+		c.Rand = c.randFloat64
 	}
 	return c
 }
 
-type realSleeper struct{}
-
-func (realSleeper) Sleep(ctx context.Context, d time.Duration) error {
+func (Config) realSleep(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -225,8 +219,6 @@ func (realSleeper) Sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-type randJitter struct{}
-
-func (randJitter) Float64() float64 {
+func (Config) randFloat64() float64 {
 	return rand.Float64() //nolint:gosec // typing jitter does not need cryptographic randomness.
 }

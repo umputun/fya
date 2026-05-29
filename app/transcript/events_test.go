@@ -10,8 +10,9 @@ import (
 
 func TestParserExtractsTextAndTools(t *testing.T) {
 	line := []byte(`{"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"hello"},{"type":"tool_use","id":"tool1"},{"type":"tool_result","tool_use_id":"tool1"}]}}`)
+	p := parser{}
 
-	event, err := newParser().parse(line)
+	event, err := p.parse(line)
 
 	require.NoError(t, err)
 	assert.Equal(t, "hello", event.Text)
@@ -22,8 +23,9 @@ func TestParserExtractsTextAndTools(t *testing.T) {
 
 func TestParserSkipsUserRecord(t *testing.T) {
 	line := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"please answer"}]}}`)
+	p := parser{}
 
-	event, err := newParser().parse(line)
+	event, err := p.parse(line)
 
 	require.NoError(t, err)
 	assert.Empty(t, event.Text, "user record must not stream as content_block_delta")
@@ -32,8 +34,9 @@ func TestParserSkipsUserRecord(t *testing.T) {
 
 func TestParserResultRecordHasNoText(t *testing.T) {
 	line := []byte(`{"type":"result","result":"final answer","sessionId":"s9"}`)
+	p := parser{}
 
-	event, err := newParser().parse(line)
+	event, err := p.parse(line)
 
 	require.NoError(t, err)
 	assert.Empty(t, event.Text, "result records are completion metadata, not streamable text")
@@ -43,8 +46,9 @@ func TestParserResultRecordHasNoText(t *testing.T) {
 
 func TestParserAssistantDeltaText(t *testing.T) {
 	line := []byte(`{"type":"assistant","delta":{"text":"streamed chunk"},"message":{"role":"assistant"}}`)
+	p := parser{}
 
-	event, err := newParser().parse(line)
+	event, err := p.parse(line)
 
 	require.NoError(t, err)
 	assert.Equal(t, "streamed chunk", event.Text)

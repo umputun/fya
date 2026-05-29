@@ -22,11 +22,6 @@ type Event struct {
 // unexported because the only consumer is the in-package Tailer.
 type parser struct{}
 
-// newParser returns a parser ready to use; the zero value is also usable.
-func newParser() *parser {
-	return &parser{}
-}
-
 func (p *parser) parse(line []byte) (Event, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(line, &raw); err != nil {

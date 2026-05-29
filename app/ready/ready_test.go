@@ -161,6 +161,24 @@ func TestDetectorPermissionsBannerDoesNotBlockGlyph(t *testing.T) {
 	assert.Equal(t, "glyph", got.Method)
 }
 
+func TestDetectorCopiesCustomSlices(t *testing.T) {
+	glyphs := []string{"READY"}
+	blockers := []string{"BLOCKED"}
+	detector := NewDetector(Config{Glyphs: glyphs, BlockingPrompts: blockers})
+	glyphs[0] = "MUTATED"
+	blockers[0] = "MUTATED"
+
+	assert.Equal(t, []string{"READY"}, detector.cfg.Glyphs)
+	assert.Equal(t, []string{"BLOCKED"}, detector.cfg.BlockingPrompts)
+}
+
+func TestDetectorPreservesExplicitEmptyBlockingPrompts(t *testing.T) {
+	detector := NewDetector(Config{BlockingPrompts: []string{}})
+
+	assert.NotNil(t, detector.cfg.BlockingPrompts)
+	assert.Empty(t, detector.cfg.BlockingPrompts)
+}
+
 func TestDetectorProcessExitBeforeReady(t *testing.T) {
 	src, state := newMockSource()
 	state.close()

@@ -51,7 +51,7 @@ func (c *Catalog) projectDir(cwd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve cwd: %w", err)
 	}
-	return filepath.Join(c.root, "projects", encodeProjectPath(abs)), nil
+	return filepath.Join(c.root, "projects", c.encodeProjectPath(abs)), nil
 }
 
 // candidates lists all .jsonl transcripts in the project directory for cwd,
@@ -144,7 +144,7 @@ func (*Catalog) promptForms(prompt string) []string {
 // encodeProjectPath returns the Claude Code project directory encoding of path:
 // every rune that is not a letter or digit becomes '-'. Matches Claude Code's
 // internal encoding so cwd "/Users/x/repo" → "-Users-x-repo".
-func encodeProjectPath(path string) string {
+func (*Catalog) encodeProjectPath(path string) string {
 	var b strings.Builder
 	for _, r := range path {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
