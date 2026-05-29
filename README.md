@@ -60,8 +60,9 @@ Wrapper controls:
 - `--cwd=PATH` - working directory for the interactive Claude session, default `.`
 - `--idle-timeout=DURATION` - transcript idle duration before completion, default `2s`
 - `--turn-timeout=DURATION` - maximum wall-clock duration for one turn, default `30m`
-- `--typing-wpm=N` - prompt typing speed, default `100`
+- `--typing-wpm=N` - prompt typing speed in words per minute, default `100`
 - `--typing-jitter=FLOAT` - per-character delay jitter ratio, default `0.20` (0 disables jitter)
+- `--max-wpm-size=N` - paste the prompt in one write instead of typing it when the prompt is longer than `N` words, default `100`. `0` always types rune-by-rune. Pasting avoids the multi-minute typing latency of large prompts; typing keeps shorter prompts arriving as individual keystrokes.
 - `--readiness-timeout=DURATION` - maximum wait for Claude input readiness, default `30s`
 - `--dbg` - enable fya debug logging. Named `--dbg` so it does not collide with Claude's own `--debug` flag, which is forwarded to Claude.
 

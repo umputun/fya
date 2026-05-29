@@ -43,6 +43,7 @@ func defaultTurnRunner(stdout, stderr io.Writer, cfg options.Config) turnExecuto
 		Injector: typing.NewInjector(typing.Config{
 			WPM:         cfg.TypingWPM,
 			Jitter:      cfg.TypingJitter,
+			MaxWPMSize:  cfg.MaxWPMSize,
 			TurnTimeout: cfg.TurnTimeout,
 			Warn:        stderr,
 		}),

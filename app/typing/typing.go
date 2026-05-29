@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -40,9 +41,13 @@ type Config struct {
 	SettleDelay   time.Duration
 	WarnThreshold time.Duration
 	TurnTimeout   time.Duration
-	Warn          io.Writer
-	Sleeper       Sleeper
-	Rand          Jitter
+	// MaxWPMSize is the prompt-length threshold in words above which the prompt
+	// is pasted in one write instead of typed rune-by-rune. 0 disables pasting
+	// and always types.
+	MaxWPMSize int
+	Warn       io.Writer
+	Sleeper    Sleeper
+	Rand       Jitter
 }
 
 // estimate captures the expected duration of typing a prompt with current settings.
@@ -87,9 +92,15 @@ func (i *Injector) validate(prompt string) error {
 // between runes, then a settle delay, then a final submit (carriage return).
 // Newlines inside the prompt emit ESC+CR (a multi-line insertion without
 // submission) so the entire prompt is delivered in one Claude message.
+//
+// When MaxWPMSize is set and the prompt is longer, Type bypasses per-rune pacing
+// and writes the whole prompt in one shot, like a terminal paste.
 func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 	if w == nil {
 		return errors.New("typing writer is nil")
+	}
+	if i.pasteMode(prompt) {
+		return i.paste(ctx, w, prompt)
 	}
 	if err := i.validate(prompt); err != nil {
 		return err
@@ -101,6 +112,32 @@ func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 		if err := i.cfg.Sleeper.Sleep(ctx, i.jitteredDelay()); err != nil {
 			return fmt.Errorf("typing delay: %w", err)
 		}
+	}
+	if err := i.cfg.Sleeper.Sleep(ctx, i.cfg.SettleDelay); err != nil {
+		return fmt.Errorf("settle delay: %w", err)
+	}
+	if _, err := io.WriteString(w, submitEnter); err != nil {
+		return fmt.Errorf("submit prompt: %w", err)
+	}
+	return nil
+}
+
+// pasteMode reports whether the prompt should be pasted in one shot instead of
+// typed rune-by-rune. It is enabled only when MaxWPMSize is positive and the
+// prompt has more words than that threshold.
+func (i *Injector) pasteMode(prompt string) bool {
+	return i.cfg.MaxWPMSize > 0 && len(strings.Fields(prompt)) > i.cfg.MaxWPMSize
+}
+
+// paste writes the whole prompt in a single write without per-rune pacing,
+// mirroring a terminal clipboard paste. Internal newlines still emit ESC+CR so
+// the prompt stays one Claude message, then a settle delay and final submit.
+// The typing-duration estimate and warning are skipped because pasting is
+// effectively instant.
+func (i *Injector) paste(ctx context.Context, w io.Writer, prompt string) error {
+	body := strings.ReplaceAll(prompt, "\n", newlineWithoutSubmit)
+	if _, err := io.WriteString(w, body); err != nil {
+		return fmt.Errorf("paste prompt: %w", err)
 	}
 	if err := i.cfg.Sleeper.Sleep(ctx, i.cfg.SettleDelay); err != nil {
 		return fmt.Errorf("settle delay: %w", err)
@@ -161,6 +198,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.WarnThreshold <= 0 {
 		c.WarnThreshold = defaultWarnThreshold
+	}
+	if c.MaxWPMSize < 0 {
+		c.MaxWPMSize = 0
 	}
 	if c.Sleeper == nil {
 		c.Sleeper = realSleeper{}

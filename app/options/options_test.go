@@ -20,6 +20,7 @@ func TestParseConsumedFlags(t *testing.T) {
 		"--cwd", "/tmp/repo",
 		"--typing-wpm", "125",
 		"--typing-jitter=0.35",
+		"--max-wpm-size=200",
 		"--readiness-timeout", "9s",
 		"--dbg",
 		"hello",
@@ -36,6 +37,7 @@ func TestParseConsumedFlags(t *testing.T) {
 	assert.Equal(t, "/tmp/repo", cfg.CWD)
 	assert.Equal(t, 125, cfg.TypingWPM)
 	assert.InEpsilon(t, 0.35, cfg.TypingJitter, 1e-9)
+	assert.Equal(t, 200, cfg.MaxWPMSize)
 	assert.Empty(t, cfg.ClaudeArgs)
 	assert.Equal(t, []string{"hello"}, cfg.PromptArgs)
 }
@@ -48,6 +50,7 @@ func TestParseDefaultsPrintText(t *testing.T) {
 	assert.Equal(t, "text", cfg.InputFormat)
 	assert.Equal(t, 100, cfg.TypingWPM)
 	assert.InEpsilon(t, 0.20, cfg.TypingJitter, 1e-9)
+	assert.Equal(t, 100, cfg.MaxWPMSize)
 }
 
 func TestParseForwardedFlags(t *testing.T) {
@@ -171,6 +174,7 @@ func TestParseValidatesWrapperControls(t *testing.T) {
 	}{
 		{name: "wpm", args: []string{"--typing-wpm=0"}, want: "typing-wpm must be positive"},
 		{name: "jitter", args: []string{"--typing-jitter=-0.1"}, want: "typing-jitter must be non-negative"},
+		{name: "max wpm size", args: []string{"--max-wpm-size=-1"}, want: "max-wpm-size must be non-negative"},
 		{name: "turn timeout", args: []string{"--turn-timeout=0"}, want: "turn-timeout must be positive"},
 	}
 

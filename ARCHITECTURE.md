@@ -70,6 +70,7 @@ Consumed by `fya`:
 - `--cwd`
 - `--typing-wpm`
 - `--typing-jitter`
+- `--max-wpm-size`
 - `--readiness-timeout`
 - `--dbg`
 - `-V`, `--version`
@@ -180,6 +181,8 @@ delay = baseDelay + spread * random(-1, +1)
 The random value is uniform in the half-open range `[-1, +1)`. With the default `--typing-wpm=100` and `--typing-jitter=0.20`, each rune sleeps for roughly 96 ms to 144 ms. Negative calculated delays are clamped to zero, which only matters with very large jitter values.
 
 After the last prompt rune, the injector waits for a 150 ms settle delay and then sends the final submit Enter (`CR`). Internal prompt newlines do not submit the message; they emit `ESC` + `CR`, which Claude treats as multiline insertion.
+
+`--max-wpm-size` is a prompt-length threshold measured in words (whitespace-delimited, via `strings.Fields`). The CLI default is `100`. When the prompt has more words than the threshold, the injector skips per-rune pacing and writes the whole prompt in a single write, like a terminal paste, then a settle delay and final `CR`. Internal newlines still become `ESC` + `CR` so the paste stays one message. Paste mode also skips the typing-duration estimate, so the turn-timeout guard and the slow-typing warning never fire for large pasted prompts. `0` disables pasting and always types rune-by-rune; the `typing.Config` zero value is `0`, so the typing engine is opt-in and only the CLI defaults to pasting. Typing rune-by-rune keeps shorter prompts arriving as individual keystrokes rather than a detectable paste block; pasting trades that for avoiding the multi-minute typing latency of very large prompts.
 
 Before typing, the injector estimates duration as:
 

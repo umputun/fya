@@ -56,6 +56,66 @@ func TestTypeMultilinePrompt(t *testing.T) {
 	assert.Equal(t, "a\x1b\rb\r", out.String())
 }
 
+func TestTypePasteAboveThreshold(t *testing.T) {
+	sleep := &fakeSleeper{}
+	var out bytes.Buffer
+
+	err := NewInjector(Config{MaxWPMSize: 2, SettleDelay: time.Millisecond, Sleeper: sleep}).Type(t.Context(), &out, "one two three")
+
+	require.NoError(t, err)
+	assert.Equal(t, "one two three\r", out.String())
+	assert.Len(t, sleep.delays, 1, "paste mode uses only the settle delay, no per-rune sleeps")
+}
+
+func TestTypePasteMultiline(t *testing.T) {
+	var out bytes.Buffer
+
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), &out, "a\nbc")
+
+	require.NoError(t, err)
+	assert.Equal(t, "a\x1b\rbc\r", out.String(), "internal newline stays ESC+CR so the paste is one message")
+}
+
+func TestTypePasteAtThresholdStillTypes(t *testing.T) {
+	sleep := &fakeSleeper{}
+	var out bytes.Buffer
+
+	err := NewInjector(Config{WPM: 100, Jitter: -1, MaxWPMSize: 2, SettleDelay: time.Millisecond, Sleeper: sleep}).
+		Type(t.Context(), &out, "a b")
+
+	require.NoError(t, err)
+	assert.Equal(t, "a b\r", out.String())
+	assert.Len(t, sleep.delays, 4, "word count equal to threshold still types rune-by-rune (3 runes + settle)")
+}
+
+func TestTypePasteDisabledByDefault(t *testing.T) {
+	sleep := &fakeSleeper{}
+	var out bytes.Buffer
+
+	err := NewInjector(Config{WPM: 100, Jitter: -1, SettleDelay: time.Millisecond, Sleeper: sleep}).Type(t.Context(), &out, "a b c d")
+
+	require.NoError(t, err)
+	assert.Len(t, sleep.delays, 8, "MaxWPMSize=0 disables paste, all runes typed (7 runes + settle)")
+}
+
+func TestTypePasteSkipsTurnTimeoutGuard(t *testing.T) {
+	var out bytes.Buffer
+
+	err := NewInjector(Config{MaxWPMSize: 1, TurnTimeout: time.Nanosecond, Sleeper: &fakeSleeper{}}).
+		Type(t.Context(), &out, "a long prompt that would exceed any tiny typing budget")
+
+	require.NoError(t, err, "paste mode must not hit the estimated-typing-duration turn-timeout guard")
+}
+
+func TestTypePasteWriteError(t *testing.T) {
+	w := &errWriter{failAfter: 0}
+
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), w, "a b c")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "paste prompt")
+}
+
 func TestJitterBounds(t *testing.T) {
 	injector := NewInjector(Config{
 		WPM:    100,

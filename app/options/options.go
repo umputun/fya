@@ -30,6 +30,7 @@ var (
 		"cwd":               {},
 		"typing-wpm":        {},
 		"typing-jitter":     {},
+		"max-wpm-size":      {},
 		"readiness-timeout": {},
 	}
 	forwardBool = map[string]struct{}{
@@ -101,6 +102,7 @@ type Config struct {
 	CWD                string
 	TypingWPM          int
 	TypingJitter       float64
+	MaxWPMSize         int
 	ReadinessTimeout   time.Duration
 	Debug              bool
 	Version            bool
@@ -118,6 +120,7 @@ type rawOptions struct {
 	CWD                string        `long:"cwd" default:"." description:"working directory for the Claude session"`
 	TypingWPM          int           `long:"typing-wpm" default:"100" description:"prompt typing speed in words per minute"`
 	TypingJitter       float64       `long:"typing-jitter" default:"0.20" description:"per-character typing delay jitter ratio (0 disables jitter)"`
+	MaxWPMSize         int           `long:"max-wpm-size" default:"100" description:"paste prompt at once instead of typing when it is longer than N words (0 always types)"`
 	ReadinessTimeout   time.Duration `long:"readiness-timeout" default:"30s" description:"maximum wait for Claude input readiness"`
 	Debug              bool          `long:"dbg" env:"DEBUG" description:"enable fya debug logging (named --dbg to avoid collision with claude --debug)"`
 	Version            bool          `short:"V" long:"version" description:"show version info"`
@@ -159,6 +162,7 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		CWD:                raw.CWD,
 		TypingWPM:          raw.TypingWPM,
 		TypingJitter:       raw.TypingJitter,
+		MaxWPMSize:         raw.MaxWPMSize,
 		ReadinessTimeout:   raw.ReadinessTimeout,
 		Debug:              raw.Debug,
 		Version:            raw.Version,
@@ -191,6 +195,9 @@ func (c Config) validate() error {
 	}
 	if c.TypingJitter < 0 {
 		return errors.New("typing-jitter must be non-negative")
+	}
+	if c.MaxWPMSize < 0 {
+		return errors.New("max-wpm-size must be non-negative")
 	}
 	if c.IdleTimeout < 0 {
 		return errors.New("idle-timeout must be non-negative")
