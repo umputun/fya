@@ -78,17 +78,6 @@ func TestTypePasteMultiline(t *testing.T) {
 	assert.Len(t, sleep.delays, 1, "single settle delay proves the paste path, not rune-by-rune typing")
 }
 
-func TestTypePasteNormalizesCRLF(t *testing.T) {
-	var out bytes.Buffer
-
-	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), &out, "a\r\nb\rc")
-
-	require.NoError(t, err)
-	// CRLF and lone CR both become ESC+CR; the only bare CR left is the final submit.
-	// a regression that left the CR would produce "a\r... " and submit early.
-	assert.Equal(t, "a\x1b\rb\x1b\rc\r", out.String())
-}
-
 func TestTypePasteAtThresholdStillTypes(t *testing.T) {
 	sleep := &fakeSleeper{}
 	var out bytes.Buffer

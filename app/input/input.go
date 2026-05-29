@@ -13,6 +13,14 @@ import (
 // the positional args.
 var ErrEmptyPrompt = errors.New("prompt is required")
 
+// newlineNormalizer collapses internal CRLF and lone CR to LF so the resolved
+// prompt carries only LF newlines. The downstream typing/paste paths translate
+// LF to an ESC+CR multiline insert; a bare CR would instead read as Enter and
+// submit the prompt early. The same normalized prompt is later matched against
+// the Claude transcript, so normalizing once here keeps injection and transcript
+// selection consistent.
+var newlineNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
 // Request describes the prompt source for one turn. ReplayUserMessages controls
 // whether stream-json user records are re-emitted on Stdout for visibility.
 type Request struct {
@@ -62,7 +70,7 @@ func (r *Reader) readText() (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", ErrEmptyPrompt
 	}
-	return prompt, nil
+	return newlineNormalizer.Replace(prompt), nil
 }
 
 func (r *Reader) readStreamJSON() (string, error) {
@@ -85,7 +93,7 @@ func (r *Reader) readStreamJSON() (string, error) {
 			return "", fmt.Errorf("replay user message: %w", err)
 		}
 	}
-	return userPrompt, nil
+	return newlineNormalizer.Replace(userPrompt), nil
 }
 
 type streamJSONParser struct {

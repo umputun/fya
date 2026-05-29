@@ -23,6 +23,8 @@ func TestReadText(t *testing.T) {
 		{name: "args fallback", args: []string{"from", "args"}, has: false, want: "from args"},
 		{name: "empty stdin falls back", args: []string{"from", "args"}, has: true, want: "from args"},
 		{name: "trims crlf", in: "hello\r\n", has: true, want: "hello"},
+		{name: "normalizes internal crlf", in: "line1\r\nline2\n", has: true, want: "line1\nline2"},
+		{name: "normalizes lone cr", in: "a\rb", has: true, want: "a\nb"},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +57,15 @@ func TestReadStreamJSON(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", got)
+}
+
+func TestReadStreamJSONNormalizesNewlines(t *testing.T) {
+	in := `{"type":"user","message":{"role":"user","content":"a\r\nb\rc"}}`
+
+	got, err := NewReader(Request{Stdin: strings.NewReader(in), StdinHasData: true, InputFormat: "stream-json"}).Read()
+
+	require.NoError(t, err)
+	assert.Equal(t, "a\nb\nc", got, "internal CRLF and lone CR normalized to LF so no bare CR submits early")
 }
 
 func TestReadStreamJSONContentForms(t *testing.T) {

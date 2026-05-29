@@ -93,6 +93,7 @@ Text mode:
 - positional args are joined with spaces as fallback
 - trailing `\r\n` is trimmed
 - a missing trailing newline is fine
+- internal `\r\n` and lone `\r` are normalized to `\n` so the resolved prompt carries only LF newlines
 - empty or whitespace-only prompts fail with `input.ErrEmptyPrompt`
 
 Stream-json input:
@@ -101,6 +102,7 @@ Stream-json input:
 - parses JSONL events
 - extracts exactly one user message
 - rejects multiple user messages by design
+- normalizes the extracted prompt's internal `\r\n` and lone `\r` to `\n` (the replayed raw event keeps its original bytes)
 - optionally replays the accepted raw user event when `--replay-user-messages` is set
 
 Prompt submission is independent of the stdin newline. `app/typing` always sends final Enter (`\r`) after typing the prompt.
