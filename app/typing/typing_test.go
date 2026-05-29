@@ -68,12 +68,25 @@ func TestTypePasteAboveThreshold(t *testing.T) {
 }
 
 func TestTypePasteMultiline(t *testing.T) {
+	sleep := &fakeSleeper{}
 	var out bytes.Buffer
 
-	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), &out, "a\nbc")
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: sleep}).Type(t.Context(), &out, "a\nbc")
 
 	require.NoError(t, err)
 	assert.Equal(t, "a\x1b\rbc\r", out.String(), "internal newline stays ESC+CR so the paste is one message")
+	assert.Len(t, sleep.delays, 1, "single settle delay proves the paste path, not rune-by-rune typing")
+}
+
+func TestTypePasteNormalizesCRLF(t *testing.T) {
+	var out bytes.Buffer
+
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), &out, "a\r\nb\rc")
+
+	require.NoError(t, err)
+	// CRLF and lone CR both become ESC+CR; the only bare CR left is the final submit.
+	// a regression that left the CR would produce "a\r... " and submit early.
+	assert.Equal(t, "a\x1b\rb\x1b\rc\r", out.String())
 }
 
 func TestTypePasteAtThresholdStillTypes(t *testing.T) {
@@ -114,6 +127,33 @@ func TestTypePasteWriteError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "paste prompt")
+}
+
+func TestTypePasteSubmitWriteError(t *testing.T) {
+	w := &errWriter{failAfter: 1}
+
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: &fakeSleeper{}}).Type(t.Context(), w, "a b c")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "submit prompt")
+}
+
+func TestTypePasteSettleCancellation(t *testing.T) {
+	err := NewInjector(Config{MaxWPMSize: 1, Sleeper: cancelSleeper{}}).Type(t.Context(), &bytes.Buffer{}, "a b c")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "settle delay")
+}
+
+func TestNewInjectorNegativeMaxWPMSizeDisablesPaste(t *testing.T) {
+	sleep := &fakeSleeper{}
+	var out bytes.Buffer
+
+	err := NewInjector(Config{WPM: 100, Jitter: -1, MaxWPMSize: -1, SettleDelay: time.Millisecond, Sleeper: sleep}).
+		Type(t.Context(), &out, "a b c")
+
+	require.NoError(t, err)
+	assert.Len(t, sleep.delays, 6, "negative MaxWPMSize clamps to 0 (paste disabled), so all runes type (5 runes + settle)")
 }
 
 func TestJitterBounds(t *testing.T) {

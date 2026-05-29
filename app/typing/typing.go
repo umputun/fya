@@ -21,6 +21,12 @@ const (
 	submitEnter          = "\r"
 )
 
+// newlineNormalizer collapses CRLF and lone CR to LF so newline handling does
+// not leave a bare CR in the stream — a bare CR equals submitEnter and would
+// submit the prompt early. Single-pass replacement avoids re-matching the CR
+// inside any replacement output.
+var newlineNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
 // Sleeper waits for d or until ctx is canceled; the real implementation uses
 // time.NewTimer with ctx.Done() select.
 type Sleeper interface {
@@ -130,12 +136,12 @@ func (i *Injector) pasteMode(prompt string) bool {
 }
 
 // paste writes the whole prompt in a single write without per-rune pacing,
-// mirroring a terminal clipboard paste. Internal newlines still emit ESC+CR so
-// the prompt stays one Claude message, then a settle delay and final submit.
-// The typing-duration estimate and warning are skipped because pasting is
-// effectively instant.
+// mirroring a terminal clipboard paste. Internal newlines (LF, CRLF, or lone
+// CR) all emit ESC+CR so the prompt stays one Claude message and no bare CR
+// submits it early, then a settle delay and final submit. The typing-duration
+// estimate and warning are skipped because pasting is effectively instant.
 func (i *Injector) paste(ctx context.Context, w io.Writer, prompt string) error {
-	body := strings.ReplaceAll(prompt, "\n", newlineWithoutSubmit)
+	body := strings.ReplaceAll(newlineNormalizer.Replace(prompt), "\n", newlineWithoutSubmit)
 	if _, err := io.WriteString(w, body); err != nil {
 		return fmt.Errorf("paste prompt: %w", err)
 	}
