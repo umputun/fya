@@ -18,7 +18,7 @@ func TestReadText(t *testing.T) {
 		has  bool
 		want string
 	}{
-		{name: "stdin wins", args: []string{"from", "args"}, in: "from stdin\n", has: true, want: "from stdin"},
+		{name: "args win over stdin", args: []string{"from", "args"}, in: "from stdin\n", has: true, want: "from args"},
 		{name: "stdin without trailing newline", in: "from stdin", has: true, want: "from stdin"},
 		{name: "args fallback", args: []string{"from", "args"}, has: false, want: "from args"},
 		{name: "empty stdin falls back", args: []string{"from", "args"}, has: true, want: "from args"},
@@ -40,6 +40,13 @@ func TestReadTextEmptyPrompt(t *testing.T) {
 	_, err := NewReader(Request{Stdin: strings.NewReader(" \n"), StdinHasData: true, InputFormat: "text"}).Read()
 
 	assert.ErrorIs(t, err, ErrEmptyPrompt)
+}
+
+func TestReadTextArgsSkipStdin(t *testing.T) {
+	got, err := NewReader(Request{Args: []string{"from", "args"}, Stdin: errReader{}, StdinHasData: true, InputFormat: "text"}).Read()
+
+	require.NoError(t, err)
+	assert.Equal(t, "from args", got)
 }
 
 func TestReadTextReadError(t *testing.T) {

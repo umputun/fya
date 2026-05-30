@@ -58,6 +58,10 @@ func (r *Reader) Read() (string, error) {
 
 func (r *Reader) readText() (string, error) {
 	prompt := strings.Join(r.req.Args, " ")
+	if strings.TrimSpace(prompt) != "" {
+		// Positional prompts are finite and must not wait on an attached but open stdin pipe.
+		return newlineNormalizer.Replace(prompt), nil
+	}
 	if r.req.StdinHasData {
 		data, err := io.ReadAll(r.req.Stdin)
 		if err != nil {

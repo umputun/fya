@@ -243,7 +243,7 @@ User messages and result summaries do not produce assistant text.
 Completion is true when:
 
 - a transcript `result` event appears, or
-- assistant text has appeared, no tool calls are pending, and transcript output has been idle for `--idle-timeout`
+- assistant text has appeared, no tool calls are pending, no `tool_use` stop reason is waiting for a later `end_turn`, and transcript output has been idle for `--idle-timeout`
 
 If Claude exits before a result event, fya drains the tailer a few more times to catch final transcript writes that landed near process exit. If a result appears during this drain, completion is normal. If not, fya emits an error final result and returns an error.
 

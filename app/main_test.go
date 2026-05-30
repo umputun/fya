@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,6 +99,31 @@ func TestExecuteDoesNotWriteBannerForSuccessfulRun(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String(), "clean stdout for runner output only")
+}
+
+func TestRunPositionalPromptDoesNotBlockOnOpenStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+
+	var stdout, stderr bytes.Buffer
+	var gotPrompt string
+	done := make(chan error, 1)
+	go func() {
+		req := request{Stdin: r, Stdout: &stdout, Stderr: &stderr, Factory: capturePromptFactory(&gotPrompt)}
+		done <- run(t.Context(), optionsConfig("hello"), req)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+		assert.Equal(t, "hello", gotPrompt)
+	case <-time.After(200 * time.Millisecond):
+		_ = w.Close()
+		_ = r.Close()
+		t.Fatal("run blocked reading open stdin despite positional prompt")
+	}
 }
 
 func TestExecuteInvalidFlag(t *testing.T) {
@@ -199,6 +225,15 @@ func testRequest(args []string, stdout, stderr io.Writer, factory turnRunnerFact
 func factoryReturning(err error) turnRunnerFactory {
 	return func(io.Writer, io.Writer, options.Config) turnExecutor {
 		return turnRunnerFunc(func(context.Context, turn.Config) error { return err })
+	}
+}
+
+func capturePromptFactory(prompt *string) turnRunnerFactory {
+	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+		return turnRunnerFunc(func(_ context.Context, cfg turn.Config) error {
+			*prompt = cfg.Prompt
+			return nil
+		})
 	}
 }
 

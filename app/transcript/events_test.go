@@ -9,7 +9,8 @@ import (
 )
 
 func TestParserExtractsTextAndTools(t *testing.T) {
-	line := []byte(`{"type":"assistant","sessionId":"s1","message":{"content":[{"type":"text","text":"hello"},{"type":"tool_use","id":"tool1"},{"type":"tool_result","tool_use_id":"tool1"}]}}`)
+	line := []byte(`{"type":"assistant","sessionId":"s1","message":{"stop_reason":"tool_use","content":[` +
+		`{"type":"text","text":"hello"},{"type":"tool_use","id":"tool1"},{"type":"tool_result","tool_use_id":"tool1"}]}}`)
 	p := parser{}
 
 	event, err := p.parse(line)
@@ -17,6 +18,7 @@ func TestParserExtractsTextAndTools(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello", event.Text)
 	assert.Equal(t, "s1", event.SessionID)
+	assert.Equal(t, "tool_use", event.StopReason)
 	assert.Equal(t, []string{"tool1"}, event.ToolUseIDs)
 	assert.Equal(t, []string{"tool1"}, event.ToolResultIDs)
 }
@@ -57,12 +59,35 @@ func TestParserAssistantDeltaText(t *testing.T) {
 func TestTrackerAndCompletion(t *testing.T) {
 	tracker := NewTracker()
 	completion := Completion{IdleTimeout: time.Second}
-	tracker.Apply(Event{Text: "thinking", ToolUseIDs: []string{"t1"}})
+	tracker.Apply(Event{Text: "thinking", ToolUseIDs: []string{"t1"}, StopReason: "tool_use"})
 
 	assert.Equal(t, 1, tracker.pendingCount())
 	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "with pending tool, completion must wait")
 
 	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
-	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "after idle with no pending tools, completion fires")
+	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "tool result still needs a later assistant end_turn")
+
+	tracker.Apply(Event{Text: "answer", StopReason: "end_turn"})
+	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "after end_turn and idle, completion fires")
 	assert.True(t, completion.Done(tracker, Event{Result: true}, 0), "explicit result event always completes")
+}
+
+func TestTrackerToolUseWithEndTurnStillWaitsForFollowup(t *testing.T) {
+	tracker := NewTracker()
+	completion := Completion{IdleTimeout: time.Second}
+	tracker.Apply(Event{ToolUseIDs: []string{"t1"}, StopReason: "end_turn"})
+	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
+
+	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "tool use still needs a later assistant answer")
+
+	tracker.Apply(Event{Text: "answer", StopReason: "end_turn"})
+	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "assistant answer after tool result can complete")
+}
+
+func TestTrackerLegacyCompletionWithoutStopReason(t *testing.T) {
+	tracker := NewTracker()
+	completion := Completion{IdleTimeout: time.Second}
+	tracker.Apply(Event{Text: "answer"})
+
+	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "old records without stop_reason still idle-complete")
 }

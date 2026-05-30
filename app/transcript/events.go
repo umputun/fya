@@ -13,6 +13,7 @@ type Event struct {
 	Type          string
 	Text          string
 	SessionID     string
+	StopReason    string
 	ToolUseIDs    []string
 	ToolResultIDs []string
 	Result        bool
@@ -28,8 +29,9 @@ func (p *parser) parse(line []byte) (Event, error) {
 		return Event{}, fmt.Errorf("parse transcript event: %w", err)
 	}
 	event := Event{
-		Type:      p.stringField(raw, "type"),
-		SessionID: p.stringField(raw, "sessionId"),
+		Type:       p.stringField(raw, "type"),
+		SessionID:  p.stringField(raw, "sessionId"),
+		StopReason: p.stopReason(raw),
 	}
 	event.Text = p.extractText(event.Type, raw)
 	event.ToolUseIDs = p.toolIDs(raw, "tool_use")
@@ -65,6 +67,17 @@ func (p *parser) isAssistant(eventType string, raw map[string]any) bool {
 	}
 	msg, ok := raw["message"].(map[string]any)
 	return ok && p.stringField(msg, "role") == "assistant"
+}
+
+func (p *parser) stopReason(raw map[string]any) string {
+	if reason := p.stringField(raw, "stop_reason"); reason != "" {
+		return reason
+	}
+	msg, ok := raw["message"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return p.stringField(msg, "stop_reason")
 }
 
 func (p *parser) toolIDs(raw map[string]any, blockType string) []string {
@@ -122,8 +135,10 @@ func (p *parser) contentText(content any) string {
 // Apply is the only cross-package entry point; the rest of the state is read
 // internally by Completion.Done.
 type Tracker struct {
-	pending      map[string]struct{}
-	sawAssistant bool
+	pending         map[string]struct{}
+	sawAssistant    bool
+	sawStopReason   bool
+	awaitingEndTurn bool
 }
 
 // NewTracker returns an empty Tracker.
@@ -136,6 +151,15 @@ func (t *Tracker) Apply(event Event) {
 	if event.Text != "" {
 		t.sawAssistant = true
 	}
+	if event.StopReason != "" {
+		t.sawStopReason = true
+	}
+	if event.StopReason == "end_turn" && len(event.ToolUseIDs) == 0 {
+		t.awaitingEndTurn = false
+	}
+	if event.StopReason == "tool_use" || len(event.ToolUseIDs) > 0 {
+		t.awaitingEndTurn = true
+	}
 	for _, id := range event.ToolUseIDs {
 		t.pending[id] = struct{}{}
 	}
@@ -144,12 +168,12 @@ func (t *Tracker) Apply(event Event) {
 	}
 }
 
-func (t *Tracker) seenAssistant() bool {
-	return t.sawAssistant
-}
-
 func (t *Tracker) pendingCount() int {
 	return len(t.pending)
+}
+
+func (t *Tracker) canIdleComplete() bool {
+	return t.sawAssistant && (!t.sawStopReason || !t.awaitingEndTurn)
 }
 
 func (*parser) stringField(raw map[string]any, name string) string {

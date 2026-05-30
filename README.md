@@ -42,7 +42,7 @@ The binary is written to `.bin/fya`.
 printf 'say hello\n' | fya --print --output-format=stream-json
 ```
 
-A positional prompt also works without stdin:
+A positional prompt also works without stdin and takes precedence over stdin:
 
 ```bash
 fya --print "say hello"
