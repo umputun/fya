@@ -3,6 +3,7 @@ package stream
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -88,6 +89,43 @@ func TestUnsupportedOutputFormatOnFinal(t *testing.T) {
 	w := NewWriter(&bytes.Buffer{}, Config{Format: "xml"})
 
 	require.Error(t, w.Final(Result{Result: "hello"}))
+}
+
+func TestTextOutputWriteError(t *testing.T) {
+	w := NewWriter(errWriter{}, Config{Format: FormatText})
+
+	err := w.Final(Result{Result: "hello"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write text result")
+}
+
+func TestTextOutputNewlineWriteError(t *testing.T) {
+	w := NewWriter(&errAfterWriter{failAfter: 1}, Config{Format: FormatText})
+
+	err := w.Final(Result{Result: "hello"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write text result newline")
+}
+
+type errWriter struct{}
+
+func (errWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+type errAfterWriter struct {
+	writes    int
+	failAfter int
+}
+
+func (w *errAfterWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes > w.failAfter {
+		return 0, errors.New("write failed")
+	}
+	return len(p), nil
 }
 
 func decodeLine(t *testing.T, line string) map[string]any {
