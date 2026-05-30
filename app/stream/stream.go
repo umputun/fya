@@ -101,10 +101,7 @@ func (w *Writer) Final(result Result) error {
 
 	switch w.cfg.Format {
 	case FormatText:
-		if _, err := fmt.Fprint(w.out, result.Result); err != nil {
-			return fmt.Errorf("write text result: %w", err)
-		}
-		return nil
+		return w.writeText(result.Result)
 	case FormatJSON:
 		return w.writeJSON(w.resultObject(result))
 	case FormatStreamJSON:
@@ -114,6 +111,19 @@ func (w *Writer) Final(result Result) error {
 	default:
 		return fmt.Errorf("unsupported output format: %s", w.cfg.Format)
 	}
+}
+
+func (w *Writer) writeText(text string) error {
+	if _, err := fmt.Fprint(w.out, text); err != nil {
+		return fmt.Errorf("write text result: %w", err)
+	}
+	if strings.HasSuffix(text, "\n") {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w.out); err != nil {
+		return fmt.Errorf("write text result newline: %w", err)
+	}
+	return nil
 }
 
 func (w *Writer) resultObject(result Result) map[string]any {

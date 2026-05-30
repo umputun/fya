@@ -34,7 +34,16 @@ func TestTextOutput(t *testing.T) {
 	require.NoError(t, w.Text("hello"))
 	require.NoError(t, w.Final(Result{}))
 
-	assert.Equal(t, "hello", out.String())
+	assert.Equal(t, "hello\n", out.String())
+}
+
+func TestTextOutputKeepsExistingNewline(t *testing.T) {
+	var out bytes.Buffer
+	w := NewWriter(&out, Config{Format: FormatText})
+
+	require.NoError(t, w.Final(Result{Result: "hello\n"}))
+
+	assert.Equal(t, "hello\n", out.String())
 }
 
 func TestDefaultOutputFormatIsText(t *testing.T) {
@@ -43,7 +52,7 @@ func TestDefaultOutputFormatIsText(t *testing.T) {
 
 	require.NoError(t, w.Final(Result{Result: "hello"}))
 
-	assert.Equal(t, "hello", out.String())
+	assert.Equal(t, "hello\n", out.String())
 }
 
 func TestJSONOutput(t *testing.T) {
@@ -66,7 +75,7 @@ func TestFinalIsIdempotent(t *testing.T) {
 	require.NoError(t, w.Final(Result{Result: "one"}))
 	require.NoError(t, w.Final(Result{Result: "two"}))
 
-	assert.Equal(t, "one", out.String(), "subsequent Final calls are no-ops")
+	assert.Equal(t, "one\n", out.String(), "subsequent Final calls are no-ops")
 }
 
 func TestUnsupportedOutputFormat(t *testing.T) {
