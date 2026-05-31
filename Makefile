@@ -11,7 +11,7 @@ all: test build
 build:
 	mkdir -p .bin
 	go build -ldflags "-X main.revision=$(REV) -s -w" -o .bin/fya.$(BRANCH) ./app
-	cp .bin/fya.$(BRANCH) .bin/fya
+	tmp=.bin/fya.tmp.$$$$; cp .bin/fya.$(BRANCH) $$tmp; mv -f $$tmp .bin/fya
 
 test:
 	go clean -testcache

@@ -347,6 +347,118 @@ func TestRunnerIdleCompletion(t *testing.T) {
 	assert.Equal(t, "s2", output.FinalCalls()[0].Result.SessionID)
 }
 
+func TestRunnerEmitsProgressText(t *testing.T) {
+	var texts []string
+	output := &mocks.OutputMock{
+		TextFunc: func(text string) error {
+			texts = append(texts, text)
+			return nil
+		},
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+				return []transcript.Event{{Type: "assistant", ProgressText: "tool: Bash go test ./...\n", Result: true, SessionID: "s"}}, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Progress: true,
+		Prompt: "hi",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tool: Bash go test ./...\n"}, texts)
+}
+
+func TestRunnerEmitsStreamMessageEvents(t *testing.T) {
+	var events []stream.Event
+	output := &mocks.OutputMock{
+		EventFunc: func(event stream.Event) error {
+			events = append(events, event)
+			return nil
+		},
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+				return []transcript.Event{{
+					Type:         "assistant",
+					Text:         "answer",
+					ProgressText: "tool: Bash go test ./...\n",
+					Message:      []byte(`{"role":"assistant","content":[{"type":"text","text":"answer"}]}`),
+					Result:       true,
+					SessionID:    "s",
+				}}, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Progress: true, StreamEvents: true,
+		Prompt: "hi",
+	})
+
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "assistant", events[0].Type)
+	assert.Equal(t, "s", events[0].SessionID)
+	assert.Empty(t, output.TextCalls(), "raw stream events replace legacy text/progress deltas")
+}
+
+func TestRunnerSkipsProgressTextWhenDisabled(t *testing.T) {
+	output := &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+				return []transcript.Event{{Type: "assistant", ProgressText: "tool: Bash go test ./...\n", Result: true, SessionID: "s"}}, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi"})
+
+	require.NoError(t, err)
+	assert.Empty(t, output.TextCalls())
+}
+
 func TestRunnerWaitsForEndTurnAfterToolUse(t *testing.T) {
 	var texts []string
 	output := &mocks.OutputMock{

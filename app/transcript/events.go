@@ -7,13 +7,17 @@ import (
 )
 
 // Event is one parsed Claude Code transcript JSONL record. Text is non-empty only
-// for assistant content that should be streamed to the consumer; user records and
-// result records do not populate Text. Result is true for terminal "result" events.
+// for assistant content that should be streamed to the consumer. ProgressText is
+// a concise stream-json summary for non-text activity such as tool calls and
+// tool errors. Result is true for terminal "result" events.
 type Event struct {
 	Type          string
+	Subtype       string
 	Text          string
+	ProgressText  string
 	SessionID     string
 	StopReason    string
+	Message       json.RawMessage
 	ToolUseIDs    []string
 	ToolResultIDs []string
 	Result        bool
@@ -30,13 +34,16 @@ func (p *parser) parse(line []byte) (Event, error) {
 	}
 	event := Event{
 		Type:       p.stringField(raw, "type"),
-		SessionID:  p.stringField(raw, "sessionId"),
+		Subtype:    p.stringField(raw, "subtype"),
+		SessionID:  p.sessionID(raw),
 		StopReason: p.stopReason(raw),
 	}
 	event.Text = p.extractText(event.Type, raw)
+	event.ProgressText = p.extractProgressText(event.Type, raw)
 	event.ToolUseIDs = p.toolIDs(raw, "tool_use")
 	event.ToolResultIDs = p.toolIDs(raw, "tool_result")
-	event.Result = event.Type == "result"
+	event.Message = p.streamMessage(event, raw)
+	event.Result = event.Type == "result" || (event.Type == "system" && event.Subtype == "turn_duration")
 	return event, nil
 }
 
@@ -67,6 +74,120 @@ func (p *parser) isAssistant(eventType string, raw map[string]any) bool {
 	}
 	msg, ok := raw["message"].(map[string]any)
 	return ok && p.stringField(msg, "role") == "assistant"
+}
+
+func (p *parser) extractProgressText(eventType string, raw map[string]any) string {
+	var lines []string
+	if p.isAssistant(eventType, raw) {
+		p.collectToolUseProgress(raw["content"], &lines)
+		if msg, ok := raw["message"].(map[string]any); ok {
+			p.collectToolUseProgress(msg["content"], &lines)
+		}
+	}
+	if eventType == "user" {
+		p.collectToolResultErrors(raw["content"], &lines)
+		if msg, ok := raw["message"].(map[string]any); ok {
+			p.collectToolResultErrors(msg["content"], &lines)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func (p *parser) collectToolUseProgress(content any, lines *[]string) {
+	items, ok := content.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range items {
+		block, ok := item.(map[string]any)
+		if !ok || p.stringField(block, "type") != "tool_use" {
+			continue
+		}
+		name := p.stringField(block, "name")
+		if name == "" {
+			name = "tool"
+		}
+		*lines = append(*lines, "tool: "+name+p.toolInputSummary(block["input"]))
+	}
+}
+
+func (p *parser) collectToolResultErrors(content any, lines *[]string) {
+	items, ok := content.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range items {
+		block, ok := item.(map[string]any)
+		if !ok || p.stringField(block, "type") != "tool_result" {
+			continue
+		}
+		isErr, _ := block["is_error"].(bool)
+		if !isErr {
+			continue
+		}
+		text := p.contentSummary(block["content"])
+		if text == "" {
+			text = "error"
+		}
+		*lines = append(*lines, "tool error: "+text)
+	}
+}
+
+func (p *parser) toolInputSummary(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range []string{"description", "command", "file_path", "pattern", "path", "url"} {
+		if text := p.stringField(m, key); text != "" {
+			return " " + p.shorten(text, 180)
+		}
+	}
+	return ""
+}
+
+func (p *parser) contentSummary(content any) string {
+	switch v := content.(type) {
+	case string:
+		return p.shorten(v, 180)
+	case []any:
+		return p.shorten(p.contentText(v), 180)
+	default:
+		return ""
+	}
+}
+
+func (*parser) shorten(s string, limit int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit-1] + "…"
+}
+
+func (p *parser) sessionID(raw map[string]any) string {
+	if id := p.stringField(raw, "session_id"); id != "" {
+		return id
+	}
+	return p.stringField(raw, "sessionId")
+}
+
+func (p *parser) streamMessage(event Event, raw map[string]any) json.RawMessage {
+	if event.Type != "assistant" && (event.Type != "user" || len(event.ToolResultIDs) == 0) {
+		return nil
+	}
+	msg, ok := raw["message"]
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 func (p *parser) stopReason(raw map[string]any) string {

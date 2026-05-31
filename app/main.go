@@ -128,11 +128,13 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 	}
 
 	if err := req.Factory(req.Stdout, req.Stderr, cfg).Run(ctx, turn.Config{
-		ClaudeArgs:  cfg.ClaudeArgs,
-		CWD:         cfg.CWD,
-		TurnTimeout: cfg.TurnTimeout,
-		IdleTimeout: cfg.IdleTimeout,
-		Prompt:      prompt,
+		ClaudeArgs:   cfg.ClaudeArgs,
+		CWD:          cfg.CWD,
+		TurnTimeout:  cfg.TurnTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+		Progress:     cfg.OutputFormat == stream.FormatStreamJSON && !cfg.Silent,
+		StreamEvents: cfg.OutputFormat == stream.FormatStreamJSON,
+		Prompt:       prompt,
 	}); err != nil {
 		return fmt.Errorf("run turn: %w", err)
 	}

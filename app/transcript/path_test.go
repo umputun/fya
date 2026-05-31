@@ -16,6 +16,41 @@ func TestCatalogEncodeProjectPath(t *testing.T) {
 	assert.Equal(t, "-Users-me-dev-fya", cat.encodeProjectPath("/Users/me/dev/fya"))
 }
 
+func TestCatalogProjectDirResolvesSymlinkedCWD(t *testing.T) {
+	root := t.TempDir()
+	realCWD := t.TempDir()
+	linkCWD := filepath.Join(t.TempDir(), "cwd-link")
+	require.NoError(t, os.Symlink(realCWD, linkCWD))
+	cat := NewCatalog(root)
+
+	got, err := cat.projectDir(linkCWD)
+
+	require.NoError(t, err)
+	physicalCWD, err := filepath.EvalSymlinks(realCWD)
+	require.NoError(t, err)
+	want := filepath.Join(root, "projects", cat.encodeProjectPath(physicalCWD))
+	assert.Equal(t, want, got)
+}
+
+func TestCatalogSelectSymlinkedCWD(t *testing.T) {
+	root := t.TempDir()
+	realCWD := t.TempDir()
+	linkCWD := filepath.Join(t.TempDir(), "cwd-link")
+	require.NoError(t, os.Symlink(realCWD, linkCWD))
+	cat := NewCatalog(root)
+	physicalCWD, err := filepath.EvalSymlinks(realCWD)
+	require.NoError(t, err)
+	dir := filepath.Join(root, "projects", cat.encodeProjectPath(physicalCWD))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	transcriptPath := filepath.Join(dir, "session.jsonl")
+	require.NoError(t, os.WriteFile(transcriptPath, []byte("target prompt"), 0o600))
+
+	got, err := cat.Select(linkCWD, time.Now().Add(-time.Minute), "target prompt")
+
+	require.NoError(t, err)
+	assert.Equal(t, transcriptPath, got)
+}
+
 func TestCatalogSelect(t *testing.T) {
 	root := t.TempDir()
 	cwd := t.TempDir()
@@ -87,6 +122,23 @@ func TestCatalogSelectJSONEscapedPrompt(t *testing.T) {
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(body+"\n"), 0o600))
 
 	got, err := cat.Select(cwd, time.Now().Add(-time.Minute), "line1\nline2 \"quoted\"")
+
+	require.NoError(t, err)
+	assert.Equal(t, transcriptPath, got)
+}
+
+func TestCatalogSelectRalphexSignalPrompt(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	transcriptPath := filepath.Join(dir, "session.jsonl")
+	body := `{"type":"user","message":{"role":"user","content":"line1\nOutput exactly: <<<RALPHEX:ALL_TASKS_DONE>>>"}}`
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(body+"\n"), 0o600))
+
+	got, err := cat.Select(cwd, time.Now().Add(-time.Minute), "line1\nOutput exactly: <<<RALPHEX:ALL_TASKS_DONE>>>")
 
 	require.NoError(t, err)
 	assert.Equal(t, transcriptPath, got)

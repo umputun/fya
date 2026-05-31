@@ -19,6 +19,7 @@ var (
 	consumedBool = map[string]struct{}{
 		"print":                {},
 		"replay-user-messages": {},
+		"silent":               {},
 		"dbg":                  {},
 		"version":              {},
 	}
@@ -97,6 +98,7 @@ type Config struct {
 	OutputFormat       string
 	InputFormat        string
 	ReplayUserMessages bool
+	Silent             bool
 	IdleTimeout        time.Duration
 	TurnTimeout        time.Duration
 	CWD                string
@@ -115,6 +117,7 @@ type rawOptions struct {
 	OutputFormat       string        `long:"output-format" choice:"text" choice:"json" choice:"stream-json" default:"text" description:"output format"`
 	InputFormat        string        `long:"input-format" choice:"text" choice:"stream-json" default:"text" description:"input format"`
 	ReplayUserMessages bool          `long:"replay-user-messages" description:"re-emit stream-json user messages on stdout"`
+	Silent             bool          `long:"silent" description:"suppress synthetic stream-json progress for tool activity"`
 	IdleTimeout        time.Duration `long:"idle-timeout" default:"2s" description:"transcript idle duration before considering a turn complete"`
 	TurnTimeout        time.Duration `long:"turn-timeout" default:"30m" description:"maximum wall-clock duration for one turn"`
 	CWD                string        `long:"cwd" default:"." description:"working directory for the Claude session"`
@@ -157,6 +160,7 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		OutputFormat:       raw.OutputFormat,
 		InputFormat:        raw.InputFormat,
 		ReplayUserMessages: raw.ReplayUserMessages,
+		Silent:             raw.Silent,
 		IdleTimeout:        raw.IdleTimeout,
 		TurnTimeout:        raw.TurnTimeout,
 		CWD:                raw.CWD,

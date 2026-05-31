@@ -65,22 +65,25 @@ type Tailer interface {
 // TailerFactory constructs a Tailer for a given transcript path.
 type TailerFactory func(path string) Tailer
 
-// Output writes assistant text deltas and the final stream-json result.
+// Output writes Claude print-mode events and the final result.
 type Output interface {
 	Text(string) error
+	Event(stream.Event) error
 	Final(stream.Result) error
 }
 
 // Config controls one Runner.Run invocation. All event output goes through
 // Dependencies.Output; stdout/stderr are owned by the caller of main.
 type Config struct {
-	ClaudeArgs  []string
-	CWD         string
-	TurnTimeout time.Duration
-	IdleTimeout time.Duration
-	Prompt      string
-	StartedAt   time.Time
-	PollPeriod  time.Duration
+	ClaudeArgs   []string
+	CWD          string
+	TurnTimeout  time.Duration
+	IdleTimeout  time.Duration
+	Progress     bool
+	StreamEvents bool
+	Prompt       string
+	StartedAt    time.Time
+	PollPeriod   time.Duration
 }
 
 // Runner orchestrates a single Claude PTY turn through the injected dependencies.
@@ -227,7 +230,13 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 		if len(events) > 0 {
 			lastEventAt = time.Now()
 		}
-		state := applyState{tracker: tracker, lastEvent: &lastEvent, completion: completion}
+		state := applyState{
+			tracker:      tracker,
+			lastEvent:    &lastEvent,
+			completion:   completion,
+			progress:     req.cfg.Progress,
+			streamEvents: req.cfg.StreamEvents,
+		}
 		done, err := r.applyEvents(events, state)
 		if err != nil {
 			return err
@@ -256,9 +265,11 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 
 // applyState groups the mutable accumulators a batch of events is folded into.
 type applyState struct {
-	tracker    *transcript.Tracker
-	lastEvent  *transcript.Event
-	completion transcript.Completion
+	tracker      *transcript.Tracker
+	lastEvent    *transcript.Event
+	completion   transcript.Completion
+	progress     bool
+	streamEvents bool
 }
 
 // applyEvents folds a batch of events through the tracker, emits text deltas,
@@ -269,9 +280,21 @@ func (r *Runner) applyEvents(events []transcript.Event, s applyState) (bool, err
 	for _, event := range events {
 		*s.lastEvent = event
 		s.tracker.Apply(event)
-		if event.Text != "" {
+		emittedEvent := false
+		if s.streamEvents && len(event.Message) > 0 {
+			if err := r.output.Event(stream.Event{Type: event.Type, SessionID: event.SessionID, Message: event.Message}); err != nil {
+				return false, fmt.Errorf("write output event: %w", err)
+			}
+			emittedEvent = true
+		}
+		if event.Text != "" && !emittedEvent {
 			if err := r.output.Text(event.Text); err != nil {
 				return false, fmt.Errorf("write output text: %w", err)
+			}
+		}
+		if s.progress && event.ProgressText != "" && !emittedEvent {
+			if err := r.output.Text(event.ProgressText); err != nil {
+				return false, fmt.Errorf("write progress text: %w", err)
 			}
 		}
 		if s.completion.Done(s.tracker, event, 0) {

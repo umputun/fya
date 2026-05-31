@@ -15,6 +15,7 @@ func TestParseConsumedFlags(t *testing.T) {
 		"--output-format=stream-json",
 		"--input-format", "stream-json",
 		"--replay-user-messages",
+		"--silent",
 		"--idle-timeout", "3s",
 		"--turn-timeout=5m",
 		"--cwd", "/tmp/repo",
@@ -28,6 +29,7 @@ func TestParseConsumedFlags(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, cfg.ReplayUserMessages)
+	assert.True(t, cfg.Silent)
 	assert.True(t, cfg.Debug)
 	assert.Equal(t, "stream-json", cfg.OutputFormat)
 	assert.Equal(t, "stream-json", cfg.InputFormat)

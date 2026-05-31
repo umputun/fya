@@ -60,6 +60,32 @@ func TestExecuteHelp(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
+func TestRunEnablesStreamProgressByDefault(t *testing.T) {
+	var got turn.Config
+	var stdout, stderr bytes.Buffer
+	cfg := optionsConfig("hello")
+	cfg.OutputFormat = "stream-json"
+
+	err := run(t.Context(), cfg, testRequest(nil, &stdout, &stderr, captureConfigFactory(&got)))
+
+	require.NoError(t, err)
+	assert.True(t, got.Progress)
+	assert.True(t, got.StreamEvents)
+}
+
+func TestRunSilentDisablesStreamProgress(t *testing.T) {
+	var got turn.Config
+	var stdout, stderr bytes.Buffer
+	cfg := optionsConfig("hello")
+	cfg.OutputFormat = "stream-json"
+	cfg.Silent = true
+
+	err := run(t.Context(), cfg, testRequest(nil, &stdout, &stderr, captureConfigFactory(&got)))
+
+	require.NoError(t, err)
+	assert.False(t, got.Progress)
+}
+
 func TestRunPropagatesTurnError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -232,6 +258,15 @@ func capturePromptFactory(prompt *string) turnRunnerFactory {
 	return func(io.Writer, io.Writer, options.Config) turnExecutor {
 		return turnRunnerFunc(func(_ context.Context, cfg turn.Config) error {
 			*prompt = cfg.Prompt
+			return nil
+		})
+	}
+}
+
+func captureConfigFactory(got *turn.Config) turnRunnerFactory {
+	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+		return turnRunnerFunc(func(_ context.Context, cfg turn.Config) error {
+			*got = cfg
 			return nil
 		})
 	}

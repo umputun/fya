@@ -64,6 +64,7 @@ Wrapper controls:
 - `--typing-jitter=FLOAT` - per-character delay jitter ratio, default `0.20` (0 disables jitter)
 - `--max-wpm-size=N` - paste the prompt in one write instead of typing it when the prompt is longer than `N` words, default `100`. `0` always types rune-by-rune. Pasting avoids the multi-minute typing latency of large prompts; typing keeps shorter prompts arriving as individual keystrokes.
 - `--readiness-timeout=DURATION` - maximum wait for Claude input readiness, default `30s`
+- `--silent` - suppress fallback synthetic `stream-json` progress for transcript records that have no Claude-compatible message event
 - `--dbg` - enable fya debug logging. Named `--dbg` so it does not collide with Claude's own `--debug` flag, which is forwarded to Claude.
 
 Recognized Claude launch flags are forwarded to interactive `claude`, including `--dangerously-skip-permissions`, `--verbose`, `--model`, `--effort`, permission/tool flags, MCP/config flags, and related interactive Claude flags. Unknown flags fail fast instead of being forwarded.
@@ -114,7 +115,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the PTY flow, transcript tailing, rea
 
 - v1 supports Unix/macOS PTYs only. Windows returns an unsupported PTY error.
 - Transcript parsing follows the current Claude Code JSONL shapes used by the implementation tests. It is not byte-for-byte parity with every Claude stream event.
-- `stream-json` emits text deltas plus one final `result`; it intentionally leaves final `result.result` empty so Ralphex does not append already streamed text a second time.
+- `stream-json` emits Claude-style `assistant`/`user` message events from the transcript plus one final `result` containing the accumulated assistant answer. When a transcript record has no message-shaped event, fya can emit concise fallback progress unless `--silent` is set.
 - Multi-turn `--input-format=stream-json` history is outside the one-shot design. Exactly one user message is accepted.
 - Live parity checks are manual because they call Claude and consume quota.
 

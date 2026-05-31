@@ -23,9 +23,16 @@ type Config struct {
 	SessionID string
 }
 
-// Result is the final per-turn metadata. For stream-json output the Result text
-// field is intentionally cleared by Writer.Final so consumers that already
-// received text deltas (e.g. Ralphex) do not get duplicate text.
+// Event is one Claude print-mode stream-json event with a nested message body.
+// It is used by the PTY/transcript path to relay assistant and tool-result
+// messages in the same broad shape as native `claude -p --output-format stream-json`.
+type Event struct {
+	Type      string
+	SessionID string
+	Message   json.RawMessage
+}
+
+// Result is the final per-turn metadata.
 type Result struct {
 	Subtype        string `json:"subtype"`
 	IsError        bool   `json:"is_error"`
@@ -53,9 +60,9 @@ func NewWriter(out io.Writer, cfg Config) *Writer {
 	return &Writer{out: out, cfg: cfg}
 }
 
-// Text emits an assistant text delta. In stream-json mode it writes a
-// content_block_delta event; in text/json modes the delta is accumulated into
-// the final Result.Result instead.
+// Text records assistant text. In stream-json mode it emits a complete
+// assistant message event instead of legacy content_block_delta records because
+// current Claude print mode streams message-shaped events.
 func (w *Writer) Text(delta string) error {
 	if delta == "" {
 		return nil
@@ -64,15 +71,41 @@ func (w *Writer) Text(delta string) error {
 	switch w.cfg.Format {
 	case FormatStreamJSON:
 		return w.writeJSON(map[string]any{
-			"type":  "content_block_delta",
-			"index": 0,
-			"delta": map[string]any{"type": "text_delta", "text": delta},
+			"type":       "assistant",
+			"session_id": w.cfg.SessionID,
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]string{{"type": "text", "text": delta}},
+			},
 		})
 	case FormatText, FormatJSON:
 		return nil
 	default:
 		return fmt.Errorf("unsupported output format: %s", w.cfg.Format)
 	}
+}
+
+// Event emits a Claude-compatible stream-json message event. For text/json
+// formats it only accumulates assistant text into the final result.
+func (w *Writer) Event(event Event) error {
+	if len(event.Message) == 0 {
+		return nil
+	}
+	if event.Type == "assistant" {
+		w.text.WriteString(messageText(event.Message))
+	}
+	if w.cfg.Format != FormatStreamJSON {
+		return nil
+	}
+	var msg any
+	if err := json.Unmarshal(event.Message, &msg); err != nil {
+		return fmt.Errorf("parse stream message: %w", err)
+	}
+	obj := map[string]any{"type": event.Type, "message": msg}
+	if event.SessionID != "" {
+		obj["session_id"] = event.SessionID
+	}
+	return w.writeJSON(obj)
 }
 
 // Final emits the terminal result event. It is idempotent: subsequent calls
@@ -105,11 +138,39 @@ func (w *Writer) Final(result Result) error {
 	case FormatJSON:
 		return w.writeJSON(w.resultObject(result))
 	case FormatStreamJSON:
-		streamResult := result
-		streamResult.Result = ""
-		return w.writeJSON(w.resultObject(streamResult))
+		return w.writeJSON(w.resultObject(result))
 	default:
 		return fmt.Errorf("unsupported output format: %s", w.cfg.Format)
+	}
+}
+
+func messageText(raw json.RawMessage) string {
+	var msg struct {
+		Content any `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return ""
+	}
+	return contentText(msg.Content)
+}
+
+func contentText(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		var out strings.Builder
+		for _, item := range v {
+			block, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			text, _ := block["text"].(string)
+			out.WriteString(text)
+		}
+		return out.String()
+	default:
+		return ""
 	}
 }
 

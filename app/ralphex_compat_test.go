@@ -49,9 +49,8 @@ func TestRalphexSignalPassthrough(t *testing.T) {
 	require.NoError(t, writer.Final(stream.Result{}))
 
 	event := eventContainingText(t, out.String(), signal)
-	assert.Equal(t, "content_block_delta", event.Type)
-	assert.Equal(t, "text_delta", event.Delta.Type)
-	assert.Equal(t, "done "+signal, event.Delta.Text)
+	assert.Equal(t, "assistant", event.Type)
+	assert.Equal(t, "done "+signal, event.messageText())
 }
 
 func TestStreamFinalDoesNotDuplicateRalphexOutput(t *testing.T) {
@@ -85,12 +84,28 @@ func TestRalphexCommandShapeOptions(t *testing.T) {
 }
 
 type ralphexEvent struct {
-	Type   string          `json:"type"`
-	Result json.RawMessage `json:"result"`
-	Delta  struct {
+	Type    string          `json:"type"`
+	Result  json.RawMessage `json:"result"`
+	Message struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"message"`
+	Delta struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"delta"`
+}
+
+func (e ralphexEvent) messageText() string {
+	var out strings.Builder
+	for _, block := range e.Message.Content {
+		if block.Type == "text" {
+			out.WriteString(block.Text)
+		}
+	}
+	return out.String()
 }
 
 func parseRalphexOutput(data string) (string, error) {
@@ -109,6 +124,8 @@ func parseRalphexOutput(data string) (string, error) {
 			continue
 		}
 		switch event.Type {
+		case "assistant":
+			out.WriteString(event.messageText())
 		case "content_block_delta":
 			if event.Delta.Type == "text_delta" {
 				out.WriteString(event.Delta.Text)
@@ -148,7 +165,7 @@ func eventContainingText(t *testing.T, data, needle string) ralphexEvent {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		event := decodeEvent(t, scanner.Text())
-		if strings.Contains(event.Delta.Text, needle) {
+		if strings.Contains(event.Delta.Text, needle) || strings.Contains(event.messageText(), needle) {
 			return event
 		}
 	}

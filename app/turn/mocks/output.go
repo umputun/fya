@@ -15,6 +15,9 @@ import (
 //
 //		// make and configure a mocked turn.Output
 //		mockedOutput := &OutputMock{
+//			EventFunc: func(event stream.Event) error {
+//				panic("mock out the Event method")
+//			},
 //			FinalFunc: func(result stream.Result) error {
 //				panic("mock out the Final method")
 //			},
@@ -28,6 +31,9 @@ import (
 //
 //	}
 type OutputMock struct {
+	// EventFunc mocks the Event method.
+	EventFunc func(event stream.Event) error
+
 	// FinalFunc mocks the Final method.
 	FinalFunc func(result stream.Result) error
 
@@ -36,6 +42,11 @@ type OutputMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Event holds details about calls to the Event method.
+		Event []struct {
+			// Event is the event argument value.
+			Event stream.Event
+		}
 		// Final holds details about calls to the Final method.
 		Final []struct {
 			// Result is the result argument value.
@@ -47,8 +58,41 @@ type OutputMock struct {
 			S string
 		}
 	}
+	lockEvent sync.RWMutex
 	lockFinal sync.RWMutex
 	lockText  sync.RWMutex
+}
+
+// Event calls EventFunc.
+func (mock *OutputMock) Event(event stream.Event) error {
+	if mock.EventFunc == nil {
+		panic("OutputMock.EventFunc: method is nil but Output.Event was just called")
+	}
+	callInfo := struct {
+		Event stream.Event
+	}{
+		Event: event,
+	}
+	mock.lockEvent.Lock()
+	mock.calls.Event = append(mock.calls.Event, callInfo)
+	mock.lockEvent.Unlock()
+	return mock.EventFunc(event)
+}
+
+// EventCalls gets all the calls that were made to Event.
+// Check the length with:
+//
+//	len(mockedOutput.EventCalls())
+func (mock *OutputMock) EventCalls() []struct {
+	Event stream.Event
+} {
+	var calls []struct {
+		Event stream.Event
+	}
+	mock.lockEvent.RLock()
+	calls = mock.calls.Event
+	mock.lockEvent.RUnlock()
+	return calls
 }
 
 // Final calls FinalFunc.

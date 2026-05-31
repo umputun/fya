@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -51,7 +52,11 @@ func (c *Catalog) projectDir(cwd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve cwd: %w", err)
 	}
-	return filepath.Join(c.root, "projects", c.encodeProjectPath(abs)), nil
+	realPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve cwd symlinks: %w", err)
+	}
+	return filepath.Join(c.root, "projects", c.encodeProjectPath(realPath)), nil
 }
 
 // candidates lists all .jsonl transcripts in the project directory for cwd,
@@ -95,10 +100,10 @@ func (c *Catalog) candidates(cwd string) ([]candidate, error) {
 // ErrNoTranscript when no candidate satisfies the filter; callers can retry as
 // Claude may not have flushed the new transcript yet.
 //
-// Prompt matching checks two forms because the transcript stores the prompt as
-// a JSON-encoded string: a raw search ("hello world") and a JSON-string-encoded
-// search ("hello \"world\"") so prompts with quotes, backslashes, or newlines
-// still match.
+// Prompt matching checks multiple forms because the transcript stores the prompt
+// as a JSON-encoded string: a raw search ("hello world"), the default Go
+// JSON-string body, and a non-HTML-escaped JSON-string body so prompts with
+// quotes, backslashes, newlines, or Ralphex markers still match.
 func (c *Catalog) Select(cwd string, since time.Time, prompt string) (string, error) {
 	candidates, err := c.candidates(cwd)
 	if err != nil {
@@ -123,22 +128,55 @@ func (c *Catalog) Select(cwd string, since time.Time, prompt string) (string, er
 	return "", ErrNoTranscript
 }
 
-// promptForms returns the raw prompt plus its JSON-string-encoded form (minus
-// the surrounding quotes) so transcripts written with JSON escaping still match.
+// promptForms returns the raw prompt plus JSON-string-encoded forms (minus
+// surrounding quotes) so transcripts written with JSON escaping still match.
+// Claude transcripts keep Ralphex markers as literal < and >, while json.Marshal
+// HTML-escapes them, so include a non-HTML-escaped JSON form too.
 // Duplicates (when the prompt has no characters needing escaping) are removed.
-func (*Catalog) promptForms(prompt string) []string {
+func (c *Catalog) promptForms(prompt string) []string {
 	if prompt == "" {
 		return nil
 	}
-	forms := []string{prompt}
-	encoded, err := json.Marshal(prompt)
-	if err == nil && len(encoded) >= 2 {
-		body := string(encoded[1 : len(encoded)-1]) // strip surrounding quotes
-		if body != prompt {
-			forms = append(forms, body)
+	forms := []string{}
+	add := func(form string) {
+		if slices.Contains(forms, form) {
+			return
 		}
+		forms = append(forms, form)
+	}
+	add(prompt)
+	if body, ok := c.jsonStringBody(prompt); ok {
+		add(body)
+	}
+	if body, ok := c.jsonStringBodyNoHTML(prompt); ok {
+		add(body)
 	}
 	return forms
+}
+
+func (c *Catalog) jsonStringBody(s string) (string, bool) {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return "", false
+	}
+	return c.trimJSONString(encoded)
+}
+
+func (c *Catalog) jsonStringBodyNoHTML(s string) (string, bool) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return "", false
+	}
+	return c.trimJSONString(bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+}
+
+func (*Catalog) trimJSONString(encoded []byte) (string, bool) {
+	if len(encoded) < 2 || encoded[0] != '"' || encoded[len(encoded)-1] != '"' {
+		return "", false
+	}
+	return string(encoded[1 : len(encoded)-1]), true
 }
 
 // encodeProjectPath returns the Claude Code project directory encoding of path:

@@ -51,8 +51,8 @@ Stdout is reserved for caller-visible output. Diagnostics, warnings, stack dumps
 - `app/ptyrun` starts a command inside a PTY, captures terminal output into a capped tail buffer, exposes process lifecycle methods, and performs graceful cleanup with hard-kill fallback.
 - `app/ready` detects when Claude's interactive editor is ready for typed input from PTY output.
 - `app/typing` types the prompt rune-by-rune with configurable WPM and jitter, sends multiline input without early submit, and sends the final Enter automatically.
-- `app/transcript` discovers Claude Code transcript JSONL files for the current cwd, selects the fresh transcript for the prompt, tails complete lines, parses assistant/tool/result events, and decides idle completion.
-- `app/stream` converts transcript text and completion into Claude-compatible `text`, `json`, or `stream-json` output.
+- `app/transcript` discovers Claude Code transcript JSONL files for the current cwd, selects the fresh transcript for the prompt, tails complete lines, parses assistant/tool/result events, exposes streamable message bodies, and decides idle completion.
+- `app/stream` converts transcript text, message events, and completion into Claude-compatible `text`, `json`, or `stream-json` output.
 - `app/turn` orchestrates one end-to-end turn using consumer-side interfaces and moq-generated mocks in tests.
 
 ## CLI And Argument Ownership
@@ -230,19 +230,20 @@ Offsets advance only past complete newline-terminated lines. A partial trailing 
 
 The parser emits `transcript.Event` values with:
 
-- assistant text suitable for output
+- assistant text suitable for text/json output
+- streamable `assistant` message bodies and `user` tool-result message bodies for stream-json output
 - session id
 - tool-use ids
 - tool-result ids
 - result marker
 
-User messages and result summaries do not produce assistant text.
+Initial user prompts and result summaries do not produce assistant text.
 
 ## Completion Rules
 
 Completion is true when:
 
-- a transcript `result` event appears, or
+- a transcript `result` event or `system`/`turn_duration` record appears, or
 - assistant text has appeared, no tool calls are pending, no `tool_use` stop reason is waiting for a later `end_turn`, and transcript output has been idle for `--idle-timeout`
 
 If Claude exits before a result event, fya drains the tailer a few more times to catch final transcript writes that landed near process exit. If a result appears during this drain, completion is normal. If not, fya emits an error final result and returns an error.
@@ -253,15 +254,15 @@ If Claude exits before a result event, fya drains the tailer a few more times to
 
 - `text`: collect assistant text and print it at completion
 - `json`: emit one final result object
-- `stream-json`: emit `content_block_delta` text events as assistant text appears, then one final `result`
+- `stream-json`: emit Claude-style `assistant`/`user` message events as transcript records arrive, then one final `result` with the accumulated assistant answer
 
-For `stream-json`, the final `result.result` is intentionally empty. Consumers like Ralphex already accumulated text deltas and would duplicate output if final result text repeated the full answer.
+For `stream-json`, message-shaped transcript records are relayed instead of converted into legacy `content_block_delta` events. If a transcript record has no streamable message body, fya can emit concise fallback progress text unless `--silent` is set.
 
 Example:
 
 ```json
-{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}
-{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"...","num_turns":1,"terminal_reason":"end_turn"}
+{"type":"assistant","session_id":"...","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"hello","session_id":"...","num_turns":1,"terminal_reason":"end_turn"}
 ```
 
 ## Signals And Cancellation

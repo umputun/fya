@@ -21,11 +21,34 @@ func TestStreamJSONEvents(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	require.Len(t, lines, 2)
 	first := decodeLine(t, lines[0])
-	assert.Equal(t, "content_block_delta", first["type"])
+	assert.Equal(t, "assistant", first["type"])
+	assert.Equal(t, "s1", first["session_id"])
+	assert.Equal(t, "hello", textFromEvent(t, first))
 	final := decodeLine(t, lines[1])
 	assert.Equal(t, "result", final["type"])
-	assert.Empty(t, final["result"], "stream-json clears result text to avoid duplication")
+	assert.Equal(t, "hello", final["result"])
 	assert.Equal(t, "s1", final["session_id"])
+}
+
+func TestStreamJSONEventPassthrough(t *testing.T) {
+	var out bytes.Buffer
+	w := NewWriter(&out, Config{Format: FormatStreamJSON})
+
+	require.NoError(t, w.Event(Event{
+		Type:      "assistant",
+		SessionID: "s2",
+		Message:   json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"hi"}]}`),
+	}))
+	require.NoError(t, w.Final(Result{}))
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	require.Len(t, lines, 2)
+	first := decodeLine(t, lines[0])
+	assert.Equal(t, "assistant", first["type"])
+	assert.Equal(t, "s2", first["session_id"])
+	assert.Equal(t, "hi", textFromEvent(t, first))
+	final := decodeLine(t, lines[1])
+	assert.Equal(t, "hi", final["result"])
 }
 
 func TestTextOutput(t *testing.T) {
@@ -133,4 +156,17 @@ func decodeLine(t *testing.T, line string) map[string]any {
 	var event map[string]any
 	require.NoError(t, json.Unmarshal([]byte(line), &event))
 	return event
+}
+
+func textFromEvent(t *testing.T, event map[string]any) string {
+	t.Helper()
+	msg, ok := event["message"].(map[string]any)
+	require.True(t, ok)
+	content, ok := msg["content"].([]any)
+	require.True(t, ok)
+	block, ok := content[0].(map[string]any)
+	require.True(t, ok)
+	text, ok := block["text"].(string)
+	require.True(t, ok)
+	return text
 }
