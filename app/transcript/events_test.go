@@ -24,30 +24,6 @@ func TestParserExtractsTextAndTools(t *testing.T) {
 	assert.NotEmpty(t, event.Message)
 }
 
-func TestParserToolUseProgressText(t *testing.T) {
-	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[` +
-		`{"type":"tool_use","id":"tool1","name":"Bash","input":{"description":"Run tests","command":"go test ./..."}}]}}`)
-	p := parser{}
-
-	event, err := p.parse(line)
-
-	require.NoError(t, err)
-	assert.Empty(t, event.Text)
-	assert.Equal(t, "tool: Bash Run tests\n", event.ProgressText)
-}
-
-func TestParserToolResultErrorProgressText(t *testing.T) {
-	line := []byte(`{"type":"user","message":{"role":"user","content":[` +
-		`{"type":"tool_result","tool_use_id":"tool1","is_error":true,"content":"Exit code 1\nfailed hard"}]}}`)
-	p := parser{}
-
-	event, err := p.parse(line)
-
-	require.NoError(t, err)
-	assert.Empty(t, event.Text)
-	assert.Equal(t, "tool error: Exit code 1 failed hard\n", event.ProgressText)
-}
-
 func TestParserSkipsInitialUserRecord(t *testing.T) {
 	line := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"please answer"}]}}`)
 	p := parser{}

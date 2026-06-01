@@ -132,7 +132,6 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		CWD:          cfg.CWD,
 		TurnTimeout:  cfg.TurnTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
-		Progress:     cfg.OutputFormat == stream.FormatStreamJSON && !cfg.Silent,
 		StreamEvents: cfg.OutputFormat == stream.FormatStreamJSON,
 		Prompt:       prompt,
 	}); err != nil {

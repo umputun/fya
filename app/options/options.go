@@ -117,7 +117,7 @@ type rawOptions struct {
 	OutputFormat       string        `long:"output-format" choice:"text" choice:"json" choice:"stream-json" default:"text" description:"output format"`
 	InputFormat        string        `long:"input-format" choice:"text" choice:"stream-json" default:"text" description:"input format"`
 	ReplayUserMessages bool          `long:"replay-user-messages" description:"re-emit stream-json user messages on stdout"`
-	Silent             bool          `long:"silent" description:"suppress synthetic stream-json progress for tool activity"`
+	Silent             bool          `long:"silent" description:"accepted for compatibility; synthetic tool progress is disabled by default"`
 	IdleTimeout        time.Duration `long:"idle-timeout" default:"2s" description:"transcript idle duration before considering a turn complete"`
 	TurnTimeout        time.Duration `long:"turn-timeout" default:"30m" description:"maximum wall-clock duration for one turn"`
 	CWD                string        `long:"cwd" default:"." description:"working directory for the Claude session"`

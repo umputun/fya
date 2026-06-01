@@ -79,7 +79,6 @@ type Config struct {
 	CWD          string
 	TurnTimeout  time.Duration
 	IdleTimeout  time.Duration
-	Progress     bool
 	StreamEvents bool
 	Prompt       string
 	StartedAt    time.Time
@@ -234,7 +233,6 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			tracker:      tracker,
 			lastEvent:    &lastEvent,
 			completion:   completion,
-			progress:     req.cfg.Progress,
 			streamEvents: req.cfg.StreamEvents,
 		}
 		done, err := r.applyEvents(events, state)
@@ -268,7 +266,6 @@ type applyState struct {
 	tracker      *transcript.Tracker
 	lastEvent    *transcript.Event
 	completion   transcript.Completion
-	progress     bool
 	streamEvents bool
 }
 
@@ -290,11 +287,6 @@ func (r *Runner) applyEvents(events []transcript.Event, s applyState) (bool, err
 		if event.Text != "" && !emittedEvent {
 			if err := r.output.Text(event.Text); err != nil {
 				return false, fmt.Errorf("write output text: %w", err)
-			}
-		}
-		if s.progress && event.ProgressText != "" && !emittedEvent {
-			if err := r.output.Text(event.ProgressText); err != nil {
-				return false, fmt.Errorf("write progress text: %w", err)
 			}
 		}
 		if s.completion.Done(s.tracker, event, 0) {

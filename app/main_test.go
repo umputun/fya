@@ -60,7 +60,7 @@ func TestExecuteHelp(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
-func TestRunEnablesStreamProgressByDefault(t *testing.T) {
+func TestRunEnablesStreamEventsForStreamJSON(t *testing.T) {
 	var got turn.Config
 	var stdout, stderr bytes.Buffer
 	cfg := optionsConfig("hello")
@@ -69,11 +69,10 @@ func TestRunEnablesStreamProgressByDefault(t *testing.T) {
 	err := run(t.Context(), cfg, testRequest(nil, &stdout, &stderr, captureConfigFactory(&got)))
 
 	require.NoError(t, err)
-	assert.True(t, got.Progress)
 	assert.True(t, got.StreamEvents)
 }
 
-func TestRunSilentDisablesStreamProgress(t *testing.T) {
+func TestRunSilentKeepsStreamEvents(t *testing.T) {
 	var got turn.Config
 	var stdout, stderr bytes.Buffer
 	cfg := optionsConfig("hello")
@@ -83,7 +82,7 @@ func TestRunSilentDisablesStreamProgress(t *testing.T) {
 	err := run(t.Context(), cfg, testRequest(nil, &stdout, &stderr, captureConfigFactory(&got)))
 
 	require.NoError(t, err)
-	assert.False(t, got.Progress)
+	assert.True(t, got.StreamEvents)
 }
 
 func TestRunPropagatesTurnError(t *testing.T) {

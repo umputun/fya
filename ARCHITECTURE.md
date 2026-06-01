@@ -72,6 +72,7 @@ Consumed by `fya`:
 - `--typing-jitter`
 - `--max-wpm-size`
 - `--readiness-timeout`
+- `--silent`
 - `--dbg`
 - `-V`, `--version`
 
@@ -256,7 +257,7 @@ If Claude exits before a result event, fya drains the tailer a few more times to
 - `json`: emit one final result object
 - `stream-json`: emit Claude-style `assistant`/`user` message events as transcript records arrive, then one final `result` with the accumulated assistant answer
 
-For `stream-json`, message-shaped transcript records are relayed instead of converted into legacy `content_block_delta` events. If a transcript record has no streamable message body, fya can emit concise fallback progress text unless `--silent` is set.
+For `stream-json`, message-shaped transcript records are relayed instead of converted into legacy `content_block_delta` events. Assistant text is streamed by default. fya does not synthesize `tool:` text progress; tool use is represented only by the relayed Claude message events.
 
 Example:
 

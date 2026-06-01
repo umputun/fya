@@ -70,14 +70,7 @@ func (w *Writer) Text(delta string) error {
 	w.text.WriteString(delta)
 	switch w.cfg.Format {
 	case FormatStreamJSON:
-		return w.writeJSON(map[string]any{
-			"type":       "assistant",
-			"session_id": w.cfg.SessionID,
-			"message": map[string]any{
-				"role":    "assistant",
-				"content": []map[string]string{{"type": "text", "text": delta}},
-			},
-		})
+		return w.writeTextEvent(delta)
 	case FormatText, FormatJSON:
 		return nil
 	default:
@@ -142,6 +135,17 @@ func (w *Writer) Final(result Result) error {
 	default:
 		return fmt.Errorf("unsupported output format: %s", w.cfg.Format)
 	}
+}
+
+func (w *Writer) writeTextEvent(text string) error {
+	return w.writeJSON(map[string]any{
+		"type":       "assistant",
+		"session_id": w.cfg.SessionID,
+		"message": map[string]any{
+			"role":    "assistant",
+			"content": []map[string]string{{"type": "text", "text": text}},
+		},
+	})
 }
 
 func messageText(raw json.RawMessage) string {
