@@ -141,13 +141,13 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Read/verify: `README.md`
 - Read/verify: `ARCHITECTURE.md`
 
-- [ ] verify terminal records still complete immediately
-- [ ] verify post-tool assistant text can complete without `end_turn`
-- [ ] verify `tool_result` alone cannot complete
-- [ ] verify transcript file activity delays idle completion until stable
-- [ ] verify session-exit drain can finish from final assistant text when Claude exits before terminal metadata is written
-- [ ] verify `--gate` only changes the default timeout and explicit `--turn-timeout` still wins
-- [ ] run final validation: `make fmt && make lint && make test && make build`
+- [x] verify terminal records still complete immediately
+- [x] verify post-tool assistant text can complete without `end_turn`
+- [x] verify `tool_result` alone cannot complete
+- [x] verify transcript file activity delays idle completion until stable
+- [x] verify session-exit drain can finish from final assistant text when Claude exits before terminal metadata is written
+- [x] verify `--gate` only changes the default timeout and explicit `--turn-timeout` still wins
+- [x] run final validation: `make fmt && make lint && make test && make build`
 
 ### Task 4: [Final] Archive plan
 

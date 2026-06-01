@@ -254,7 +254,7 @@ Completion is true when:
 
 Assistant text is completion-eligible only when it is not part of a tool-use event. This lets fya finish when Claude writes a post-tool final answer but omits `stop_reason: "end_turn"`, without finishing immediately after the `tool_result` alone.
 
-If Claude exits before a result event, fya drains the tailer a few more times to catch final transcript writes that landed near process exit. If a result appears during this drain, completion is normal. If not, fya emits an error final result and returns an error.
+If Claude exits before a result event, fya drains the tailer a few more times to catch final transcript writes that landed near process exit. If drained events contain a terminal record or completion-eligible final assistant text, completion is normal. If not, fya emits an error final result and returns an error.
 
 ## Output Contract
 
