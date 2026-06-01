@@ -15,7 +15,7 @@ import (
 //
 //		// make and configure a mocked turn.Tailer
 //		mockedTailer := &TailerMock{
-//			ReadNewFunc: func() ([]transcript.Event, error) {
+//			ReadNewFunc: func() ([]transcript.Event, bool, error) {
 //				panic("mock out the ReadNew method")
 //			},
 //		}
@@ -26,7 +26,7 @@ import (
 //	}
 type TailerMock struct {
 	// ReadNewFunc mocks the ReadNew method.
-	ReadNewFunc func() ([]transcript.Event, error)
+	ReadNewFunc func() ([]transcript.Event, bool, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -38,7 +38,7 @@ type TailerMock struct {
 }
 
 // ReadNew calls ReadNewFunc.
-func (mock *TailerMock) ReadNew() ([]transcript.Event, error) {
+func (mock *TailerMock) ReadNew() ([]transcript.Event, bool, error) {
 	if mock.ReadNewFunc == nil {
 		panic("TailerMock.ReadNewFunc: method is nil but Tailer.ReadNew was just called")
 	}

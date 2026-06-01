@@ -57,9 +57,11 @@ type Catalog interface {
 	Select(cwd string, since time.Time, prompt string) (string, error)
 }
 
-// Tailer reads new events from a transcript file across successive polls.
+// Tailer reads transcript records across successive polls. ReadNew returns
+// parsed events plus a transcript file-activity flag since the previous read,
+// including partial trailing JSONL and records ignored by higher layers.
 type Tailer interface {
-	ReadNew() ([]transcript.Event, error)
+	ReadNew() ([]transcript.Event, bool, error)
 }
 
 // TailerFactory constructs a Tailer for a given transcript path.
@@ -215,19 +217,19 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 	ticker := time.NewTicker(req.cfg.PollPeriod)
 	defer ticker.Stop()
 	sessionDone := req.session.Done()
-	lastEventAt := time.Now()
+	lastTranscriptActivityAt := time.Now()
 	var lastEvent transcript.Event
 
 	for {
-		events, err := req.tailer.ReadNew()
+		events, activity, err := req.tailer.ReadNew()
 		if err != nil {
 			if finalErr := r.output.Final(stream.Result{SessionID: lastEvent.SessionID, IsError: true, Subtype: "error"}); finalErr != nil {
 				return fmt.Errorf("write final output: %w", finalErr)
 			}
 			return fmt.Errorf("read transcript: %w", err)
 		}
-		if len(events) > 0 {
-			lastEventAt = time.Now()
+		if activity || len(events) > 0 {
+			lastTranscriptActivityAt = time.Now()
 		}
 		state := applyState{
 			tracker:      tracker,
@@ -242,7 +244,7 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 		if done {
 			return nil
 		}
-		if completion.Done(tracker, lastEvent, time.Since(lastEventAt)) {
+		if completion.Done(tracker, lastEvent, time.Since(lastTranscriptActivityAt)) {
 			if err := r.output.Final(stream.Result{SessionID: lastEvent.SessionID}); err != nil {
 				return fmt.Errorf("write final output: %w", err)
 			}
@@ -320,7 +322,7 @@ const (
 // Final.
 func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applyState) error {
 	for attempt := range drainRetries {
-		drained, err := tailer.ReadNew()
+		drained, _, err := tailer.ReadNew()
 		if err != nil {
 			if finalErr := r.output.Final(stream.Result{SessionID: s.lastEvent.SessionID, IsError: true, Subtype: "error"}); finalErr != nil {
 				return fmt.Errorf("write final output after session exit: %w", finalErr)
@@ -344,6 +346,12 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 			case <-time.After(drainRetryDelay):
 			}
 		}
+	}
+	if s.completion.Done(s.tracker, *s.lastEvent, s.completion.IdleTimeout) {
+		if err := r.output.Final(stream.Result{SessionID: s.lastEvent.SessionID}); err != nil {
+			return fmt.Errorf("write final output after session exit: %w", err)
+		}
+		return nil
 	}
 	if err := r.output.Final(stream.Result{
 		SessionID: s.lastEvent.SessionID,

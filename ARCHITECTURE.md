@@ -229,6 +229,8 @@ Transcript selection:
 
 Offsets advance only past complete newline-terminated lines. A partial trailing line is not consumed, so a poll that catches Claude mid-write can re-read the completed line on the next poll.
 
+The tailer also tracks transcript file-size activity. Activity is true on the first read and whenever the file size changes, including partial trailing JSONL and ignored metadata records that do not become output. The runner resets idle completion timing on parsed events or file activity, so idle completion waits for transcript file stability rather than parsed assistant events alone.
+
 The parser emits `transcript.Event` values with:
 
 - assistant text suitable for text/json output

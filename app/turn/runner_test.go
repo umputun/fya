@@ -52,8 +52,8 @@ func TestRunnerSuccess(t *testing.T) {
 		},
 		TailerFactory: func(path string) turn.Tailer {
 			assert.Equal(t, "session.jsonl", path)
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
-				return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, nil
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, true, nil
 			}}
 		},
 		Output: output,
@@ -201,8 +201,8 @@ func TestRunnerInjectorWritesPromptToSession(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
-				return []transcript.Event{{Result: true, SessionID: "s"}}, nil
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Result: true, SessionID: "s"}}, true, nil
 			}}
 		},
 		Output: &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }},
@@ -259,8 +259,8 @@ func TestRunnerTailerError(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
-				return nil, errors.New("tail boom")
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return nil, false, errors.New("tail boom")
 			}}
 		},
 		Output: output,
@@ -292,8 +292,8 @@ func TestRunnerFinalError(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
-				return []transcript.Event{{Text: "x", Result: true, SessionID: "s"}}, nil
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Text: "x", Result: true, SessionID: "s"}}, true, nil
 			}}
 		},
 		Output: output,
@@ -325,12 +325,12 @@ func TestRunnerIdleCompletion(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
-					return []transcript.Event{{Text: "answer", SessionID: "s2"}}, nil
+					return []transcript.Event{{Text: "answer", SessionID: "s2"}}, true, nil
 				}
-				return nil, nil
+				return nil, false, nil
 			}}
 		},
 		Output: output,
@@ -345,6 +345,56 @@ func TestRunnerIdleCompletion(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, output.FinalCalls(), 1)
 	assert.Equal(t, "s2", output.FinalCalls()[0].Result.SessionID)
+}
+
+func TestRunnerTranscriptActivityDelaysIdleCompletion(t *testing.T) {
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	calls := 0
+	finalAt := 0
+	activityPolls := 8
+	output.FinalFunc = func(stream.Result) error {
+		finalAt = calls
+		return nil
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				calls++
+				switch {
+				case calls == 1:
+					return []transcript.Event{{Text: "answer", SessionID: "s2"}}, true, nil
+				case calls <= activityPolls+1:
+					return nil, true, nil
+				default:
+					return nil, false, nil
+				}
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Second, IdleTimeout: 20 * time.Millisecond,
+		Prompt:     "hi",
+		PollPeriod: 5 * time.Millisecond,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, output.FinalCalls(), 1)
+	assert.Greater(t, finalAt, activityPolls+1)
 }
 
 func TestRunnerEmitsDeltaTextWithoutStreamMessage(t *testing.T) {
@@ -373,8 +423,8 @@ func TestRunnerEmitsDeltaTextWithoutStreamMessage(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
-				return []transcript.Event{{Type: "assistant", Text: "streamed chunk", Result: true, SessionID: "s"}}, nil
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Type: "assistant", Text: "streamed chunk", Result: true, SessionID: "s"}}, true, nil
 			}}
 		},
 		Output: output,
@@ -412,14 +462,14 @@ func TestRunnerEmitsStreamMessageEvents(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{
 					Type:      "assistant",
 					Text:      "answer",
 					Message:   []byte(`{"role":"assistant","content":[{"type":"text","text":"answer"}]}`),
 					Result:    true,
 					SessionID: "s",
-				}}, nil
+				}}, true, nil
 			}}
 		},
 		Output: output,
@@ -459,21 +509,21 @@ func TestRunnerWaitsForEndTurnAfterToolUse(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
 				case 1:
-					return []transcript.Event{{Text: "I'll look.", SessionID: "s3", StopReason: "tool_use"}}, nil
+					return []transcript.Event{{Text: "I'll look.", SessionID: "s3", StopReason: "tool_use"}}, true, nil
 				case 2:
-					return []transcript.Event{{ToolUseIDs: []string{"t1"}, SessionID: "s3", StopReason: "tool_use"}}, nil
+					return []transcript.Event{{ToolUseIDs: []string{"t1"}, SessionID: "s3", StopReason: "tool_use"}}, true, nil
 				case 3:
-					return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s3"}}, nil
+					return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s3"}}, true, nil
 				case 4:
-					return nil, nil
+					return nil, false, nil
 				case 5:
-					return []transcript.Event{{Text: "final answer", SessionID: "s3", StopReason: "end_turn"}}, nil
+					return []transcript.Event{{Text: "final answer", SessionID: "s3", StopReason: "end_turn"}}, true, nil
 				default:
-					return nil, nil
+					return nil, false, nil
 				}
 			}}
 		},
@@ -513,21 +563,21 @@ func TestRunnerCompletesPostToolAnswerWithoutEndTurn(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
 				case 1:
-					return []transcript.Event{{Text: "I'll look.", SessionID: "s3", StopReason: "tool_use"}}, nil
+					return []transcript.Event{{Text: "I'll look.", SessionID: "s3", StopReason: "tool_use"}}, true, nil
 				case 2:
-					return []transcript.Event{{ToolUseIDs: []string{"t1"}, SessionID: "s3", StopReason: "tool_use"}}, nil
+					return []transcript.Event{{ToolUseIDs: []string{"t1"}, SessionID: "s3", StopReason: "tool_use"}}, true, nil
 				case 3:
-					return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s3"}}, nil
+					return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s3"}}, true, nil
 				case 4:
-					return nil, nil
+					return nil, false, nil
 				case 5:
-					return []transcript.Event{{Text: "final verdict", SessionID: "s3"}}, nil
+					return []transcript.Event{{Text: "final verdict", SessionID: "s3"}}, true, nil
 				default:
-					return nil, nil
+					return nil, false, nil
 				}
 			}}
 		},
@@ -603,17 +653,17 @@ func TestRunnerSessionExitWithDrainableResult(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
 				case 1:
-					return nil, nil // empty first poll
+					return nil, false, nil // empty first poll
 				case 2:
 					close(done) // claude exits after first poll
-					return nil, nil
+					return nil, false, nil
 				default:
 					// drain after exit: a result event is available
-					return []transcript.Event{{Text: "final answer", Result: true, SessionID: "s3"}}, nil
+					return []transcript.Event{{Text: "final answer", Result: true, SessionID: "s3"}}, true, nil
 				}
 			}}
 		},
@@ -655,18 +705,18 @@ func TestRunnerSessionExitDrainRetriesPickUpResult(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
 				case 1:
-					return nil, nil
+					return nil, false, nil
 				case 2:
 					close(done) // claude exits after first poll
-					return nil, nil
+					return nil, false, nil
 				case 3:
-					return nil, nil // first drain attempt: empty (OS hasn't flushed yet)
+					return nil, false, nil // first drain attempt: empty (OS hasn't flushed yet)
 				default:
-					return []transcript.Event{{Text: "answer", Result: true, SessionID: "s4"}}, nil
+					return []transcript.Event{{Text: "answer", Result: true, SessionID: "s4"}}, true, nil
 				}
 			}}
 		},
@@ -683,6 +733,134 @@ func TestRunnerSessionExitDrainRetriesPickUpResult(t *testing.T) {
 	require.Len(t, output.FinalCalls(), 1)
 	assert.False(t, output.FinalCalls()[0].Result.IsError)
 	assert.Equal(t, "s4", output.FinalCalls()[0].Result.SessionID)
+}
+
+type sessionExitDrainTest struct {
+	readNew func(call int, done chan struct{}) ([]transcript.Event, bool, error)
+	config  turn.Config
+}
+
+type sessionExitDrainResult struct {
+	err    error
+	output *mocks.OutputMock
+	texts  []string
+}
+
+func runSessionExitDrainTest(t *testing.T, tc sessionExitDrainTest) sessionExitDrainResult {
+	t.Helper()
+	done := make(chan struct{})
+	session := newSessionMockWithDone(done)
+	var texts []string
+	output := &mocks.OutputMock{
+		TextFunc: func(text string) error {
+			texts = append(texts, text)
+			return nil
+		},
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	calls := 0
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return session, nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				calls++
+				return tc.readNew(calls, done)
+			}}
+		},
+		Output: output,
+	})
+
+	cfg := tc.config
+	cfg.CWD = "."
+	cfg.Prompt = "hi"
+	err := runner.Run(t.Context(), cfg)
+
+	return sessionExitDrainResult{err: err, output: output, texts: texts}
+}
+
+func TestRunnerSessionExitDrainCompletesFinalAssistantText(t *testing.T) {
+	res := runSessionExitDrainTest(t, sessionExitDrainTest{
+		config: turn.Config{TurnTimeout: time.Second, IdleTimeout: time.Second, PollPeriod: time.Millisecond},
+		readNew: func(call int, done chan struct{}) ([]transcript.Event, bool, error) {
+			switch call {
+			case 1:
+				close(done)
+				return nil, false, nil
+			case 2:
+				return []transcript.Event{{Text: "final answer", SessionID: "s5"}}, true, nil
+			default:
+				return nil, false, nil
+			}
+		},
+	})
+
+	require.NoError(t, res.err)
+	require.Len(t, res.output.FinalCalls(), 1)
+	assert.False(t, res.output.FinalCalls()[0].Result.IsError)
+	assert.Equal(t, "s5", res.output.FinalCalls()[0].Result.SessionID)
+	assert.Equal(t, []string{"final answer"}, res.texts)
+}
+
+func TestRunnerSessionExitDrainCompletesPostToolFinalAssistantText(t *testing.T) {
+	res := runSessionExitDrainTest(t, sessionExitDrainTest{
+		config: turn.Config{TurnTimeout: 5 * time.Second, IdleTimeout: time.Second, PollPeriod: 10 * time.Millisecond},
+		readNew: func(call int, done chan struct{}) ([]transcript.Event, bool, error) {
+			switch call {
+			case 1:
+				return []transcript.Event{{
+					Text: "I'll check.", ToolUseIDs: []string{"t1"}, StopReason: "tool_use", SessionID: "s6",
+				}}, true, nil
+			case 2:
+				close(done)
+				return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s6"}}, true, nil
+			case 3:
+				return []transcript.Event{{Text: "final verdict", SessionID: "s6"}}, true, nil
+			default:
+				return nil, false, nil
+			}
+		},
+	})
+
+	require.NoError(t, res.err)
+	require.Len(t, res.output.FinalCalls(), 1)
+	assert.False(t, res.output.FinalCalls()[0].Result.IsError)
+	assert.Equal(t, "s6", res.output.FinalCalls()[0].Result.SessionID)
+	assert.Equal(t, []string{"I'll check.", "final verdict"}, res.texts)
+}
+
+func TestRunnerSessionExitDrainToolResultAloneDoesNotComplete(t *testing.T) {
+	res := runSessionExitDrainTest(t, sessionExitDrainTest{
+		config: turn.Config{TurnTimeout: time.Second, IdleTimeout: time.Second, PollPeriod: time.Hour},
+		readNew: func(call int, done chan struct{}) ([]transcript.Event, bool, error) {
+			switch call {
+			case 1:
+				close(done)
+				return []transcript.Event{{
+					Text: "I'll check.", ToolUseIDs: []string{"t1"}, StopReason: "tool_use", SessionID: "s7",
+				}}, true, nil
+			case 2:
+				return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s7"}}, true, nil
+			default:
+				return nil, false, nil
+			}
+		},
+	})
+
+	require.Error(t, res.err)
+	assert.Contains(t, res.err.Error(), "claude exited before turn completion")
+	require.Len(t, res.output.FinalCalls(), 1)
+	assert.True(t, res.output.FinalCalls()[0].Result.IsError)
+	assert.Equal(t, "s7", res.output.FinalCalls()[0].Result.SessionID)
+	assert.Equal(t, []string{"I'll check."}, res.texts)
 }
 
 // drain retry waits must honor context cancellation instead of sleeping through it.
@@ -708,7 +886,7 @@ func TestRunnerSessionExitDrainHonorsContext(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
 				case 1:
@@ -716,7 +894,7 @@ func TestRunnerSessionExitDrainHonorsContext(t *testing.T) {
 				case 2:
 					cancel() // cancel before the drain retry wait starts
 				}
-				return nil, nil
+				return nil, false, nil
 			}}
 		},
 		Output: output,
@@ -751,13 +929,13 @@ func TestRunnerSessionExitDrainPropagatesError(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
 					close(done) // claude exits before any successful poll
-					return nil, nil
+					return nil, false, nil
 				}
-				return nil, errors.New("tailer boom during drain")
+				return nil, false, errors.New("tailer boom during drain")
 			}}
 		},
 		Output: output,
@@ -797,12 +975,12 @@ func TestRunnerSessionExitMidStream(t *testing.T) {
 			return "x.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
 					close(done) // claude exits after first poll, before any result event
 				}
-				return nil, nil
+				return nil, false, nil
 			}}
 		},
 		Output: output,
@@ -868,7 +1046,7 @@ func TestRunnerTimeout(t *testing.T) {
 			return "session.jsonl", nil
 		}},
 		TailerFactory: func(string) turn.Tailer {
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) { return nil, nil }}
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) { return nil, false, nil }}
 		},
 		Output: output,
 	})
@@ -915,5 +1093,5 @@ func runnerWithCatalogError(err error) *turn.Runner {
 }
 
 func noopTailerFactory(string) turn.Tailer {
-	return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) { return nil, nil }}
+	return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) { return nil, false, nil }}
 }

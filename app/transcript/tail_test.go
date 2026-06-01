@@ -18,12 +18,18 @@ func TestTailerReadsLargeLinesAndOffsets(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	tailer := NewTailer(path)
 
-	events, err := tailer.ReadNew()
+	events, activity, err := tailer.ReadNew()
 
 	require.NoError(t, err)
+	assert.True(t, activity)
 	require.Len(t, events, 2)
 	assert.Equal(t, large, events[0].Text)
 	assert.Equal(t, int64(len(content)), tailer.offset)
+
+	events, activity, err = tailer.ReadNew()
+	require.NoError(t, err)
+	assert.False(t, activity)
+	assert.Empty(t, events)
 }
 
 // when EOF arrives mid-line the tailer must NOT advance Offset past the partial
@@ -36,23 +42,40 @@ func TestTailerPartialLineSafe(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(first+prefix), 0o600))
 	tailer := NewTailer(path)
 
-	events, err := tailer.ReadNew()
+	events, activity, err := tailer.ReadNew()
 
 	require.NoError(t, err, "partial line at EOF must not cause a parse error")
+	assert.True(t, activity)
 	require.Len(t, events, 1)
 	assert.Equal(t, "hi", events[0].Text)
 	assert.Equal(t, int64(len(first)), tailer.offset, "offset must not advance over the partial")
 
-	// finish writing the line and confirm the next poll picks it up.
-	suffix := `"text":"world"}]}}` + "\n"
+	appendTranscript(t, path, `"text":"wo`)
+	events, activity, err = tailer.ReadNew()
+	require.NoError(t, err)
+	assert.True(t, activity)
+	assert.Empty(t, events)
+	assert.Equal(t, int64(len(first)), tailer.offset, "offset must not advance over the growing partial")
+
+	events, activity, err = tailer.ReadNew()
+	require.NoError(t, err)
+	assert.False(t, activity)
+	assert.Empty(t, events)
+
+	appendTranscript(t, path, `rld"}]}}`+"\n")
+	events, activity, err = tailer.ReadNew()
+	require.NoError(t, err)
+	assert.True(t, activity)
+	require.Len(t, events, 1)
+	assert.Equal(t, "world", events[0].Text)
+}
+
+func appendTranscript(t *testing.T, path, value string) {
+	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
-	_, writeErr := f.WriteString(suffix)
-	require.NoError(t, writeErr)
-	require.NoError(t, f.Close())
+	defer func() { require.NoError(t, f.Close()) }()
 
-	events2, err := tailer.ReadNew()
-	require.NoError(t, err)
-	require.Len(t, events2, 1)
-	assert.Equal(t, "world", events2[0].Text)
+	_, writeErr := f.WriteString(value)
+	require.NoError(t, writeErr)
 }

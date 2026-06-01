@@ -14,9 +14,11 @@ import (
 // past complete newline-terminated lines so a poll that catches Claude mid-write
 // can re-read the partial line on the next call.
 type Tailer struct {
-	path   string
-	offset int64
-	parser *parser
+	path     string
+	offset   int64
+	size     int64
+	seenSize bool
+	parser   *parser
 }
 
 // NewTailer returns a Tailer pointed at path.
@@ -25,17 +27,22 @@ func NewTailer(path string) *Tailer {
 }
 
 // ReadNew opens the transcript file, reads from the current offset to EOF, and
-// returns any complete lines parsed as Events. Partial trailing bytes are left
-// unread; offset is only advanced past lines terminated by '\n' so a torn write
-// at EOF will be picked up cleanly on the next poll.
-func (t *Tailer) ReadNew() ([]Event, error) {
+// returns complete lines parsed as Events plus a file-activity flag. Partial
+// trailing bytes are left unread; offset is only advanced past lines terminated
+// by '\n' so a torn write at EOF will be picked up cleanly on the next poll.
+func (t *Tailer) ReadNew() ([]Event, bool, error) {
 	f, err := os.Open(t.path)
 	if err != nil {
-		return nil, fmt.Errorf("open transcript: %w", err)
+		return nil, false, fmt.Errorf("open transcript: %w", err)
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, false, fmt.Errorf("stat transcript: %w", err)
+	}
+	activity := !t.seenSize || info.Size() != t.size
 	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seek transcript: %w", err)
+		return nil, activity, fmt.Errorf("seek transcript: %w", err)
 	}
 	reader := bufio.NewReader(f)
 	events := []Event{}
@@ -46,15 +53,22 @@ func (t *Tailer) ReadNew() ([]Event, error) {
 			t.offset += int64(len(line))
 			event, parseErr := t.parser.parse(bytes.TrimRight(line, "\r\n"))
 			if parseErr != nil {
-				return nil, parseErr
+				return nil, activity, parseErr
 			}
 			events = append(events, event)
 		}
 		if errors.Is(err, io.EOF) {
-			return events, nil
+			info, statErr := f.Stat()
+			if statErr != nil {
+				return nil, false, fmt.Errorf("stat transcript: %w", statErr)
+			}
+			activity = activity || !t.seenSize || info.Size() != t.size || len(events) > 0
+			t.seenSize = true
+			t.size = info.Size()
+			return events, activity, nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read transcript: %w", err)
+			return nil, activity, fmt.Errorf("read transcript: %w", err)
 		}
 	}
 }
