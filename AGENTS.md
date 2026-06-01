@@ -38,6 +38,7 @@
 - When Claude exits during transcript streaming, drain the transcript tailer briefly before declaring failure; a final result event can land just before process exit.
 - On incomplete session exit, emit a final `stream.Result` with `IsError: true` and return an error instead of polling forever.
 - Tail JSONL by complete newline-terminated records only; do not advance offsets past partial trailing lines.
+- Stream-json compatibility means relaying Claude-shaped message events. Do not synthesize `tool:` assistant text from tool_use/tool_result records; Ralphex treats assistant text as user-visible progress and will log synthetic tool text as noise.
 - Prompt matching against transcript files must consider both raw and JSON-escaped prompt forms.
 - Readiness detection must not promote stable blocking dialogs to ready. Known trust/permission prompts should veto glyph and quiet-period readiness paths.
 - `typing-jitter=0` means no jitter. CLI defaults may set nonzero jitter, but internal defaults must not silently re-enable it.
