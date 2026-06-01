@@ -50,9 +50,49 @@ func TestParseDefaultsPrintText(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "text", cfg.OutputFormat)
 	assert.Equal(t, "text", cfg.InputFormat)
+	assert.Equal(t, 30*time.Minute, cfg.TurnTimeout)
 	assert.Equal(t, 100, cfg.TypingWPM)
 	assert.InEpsilon(t, 0.20, cfg.TypingJitter, 1e-9)
 	assert.Equal(t, 100, cfg.MaxWPMSize)
+}
+
+func TestParseGateDefaultTurnTimeout(t *testing.T) {
+	cfg, err := NewParser().Parse([]string{"--gate", "hello"})
+
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, cfg.TurnTimeout)
+	assert.Empty(t, cfg.ClaudeArgs)
+	assert.Equal(t, []string{"hello"}, cfg.PromptArgs)
+}
+
+func TestParseGateHonorsExplicitTurnTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "equals", args: []string{"--gate", "--turn-timeout=10m", "hello"}},
+		{name: "separate", args: []string{"--gate", "--turn-timeout", "10m", "hello"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := NewParser().Parse(tt.args)
+
+			require.NoError(t, err)
+			assert.Equal(t, 10*time.Minute, cfg.TurnTimeout)
+			assert.Empty(t, cfg.ClaudeArgs)
+			assert.Equal(t, []string{"hello"}, cfg.PromptArgs)
+		})
+	}
+}
+
+func TestParseGateDoubleDashKeepsTurnTimeoutPromptText(t *testing.T) {
+	cfg, err := NewParser().Parse([]string{"--gate", "--", "--turn-timeout", "10m", "hello"})
+
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, cfg.TurnTimeout)
+	assert.Empty(t, cfg.ClaudeArgs)
+	assert.Equal(t, []string{"--turn-timeout", "10m", "hello"}, cfg.PromptArgs)
 }
 
 func TestParseForwardedFlags(t *testing.T) {

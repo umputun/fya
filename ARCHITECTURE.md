@@ -67,6 +67,7 @@ Consumed by `fya`:
 - `--replay-user-messages`
 - `--idle-timeout`
 - `--turn-timeout`
+- `--gate`
 - `--cwd`
 - `--typing-wpm`
 - `--typing-jitter`
@@ -194,6 +195,8 @@ runeCount(prompt) * baseDelay + settleDelay
 ```
 
 If estimated typing time exceeds `--turn-timeout`, it fails before launching the prompt into Claude. If the estimate exceeds the warning threshold, currently 30 seconds, fya writes a warning to stderr.
+
+`--gate` is a wrapper-only profile for unattended gate or cron runs. It does not change completion semantics; it only changes the default turn timeout from `30m` to `5m` when `--turn-timeout` was not supplied. Explicit `--turn-timeout` always wins, and values after `--` are prompt text.
 
 ## Transcript Discovery
 

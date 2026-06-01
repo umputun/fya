@@ -123,14 +123,14 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `README.md`
 - Modify: `ARCHITECTURE.md`
 
-- [ ] write parser tests for `--gate` setting `TurnTimeout` to `5m` when `--turn-timeout` is omitted
-- [ ] write parser tests proving explicit `--turn-timeout=10m` and `--turn-timeout 10m` both win over `--gate`
-- [ ] write parser tests proving `--turn-timeout` after `--` is prompt text and does not disable the `--gate` 5m default
-- [ ] add internal gate handling to options parsing without forwarding `--gate` to Claude or exposing `Gate` on `options.Config`
-- [ ] add explicit `--turn-timeout` detection through splitter-owned parse state, not a naive raw-args scan
-- [ ] document `--gate` in README and architecture docs
-- [ ] run focused tests: `go test ./app/options -count=1`
-- [ ] run quality gate: `make fmt && make lint && make test`
+- [x] write parser tests for `--gate` setting `TurnTimeout` to `5m` when `--turn-timeout` is omitted
+- [x] write parser tests proving explicit `--turn-timeout=10m` and `--turn-timeout 10m` both win over `--gate`
+- [x] write parser tests proving `--turn-timeout` after `--` is prompt text and does not disable the `--gate` 5m default
+- [x] add internal gate handling to options parsing without forwarding `--gate` to Claude or exposing `Gate` on `options.Config`
+- [x] add explicit `--turn-timeout` detection through splitter-owned parse state, not a naive raw-args scan
+- [x] document `--gate` in README and architecture docs
+- [x] run focused tests: `go test ./app/options -count=1`
+- [x] run quality gate: `make fmt && make lint && make test`
 
 ### Task 3: Verify acceptance criteria
 

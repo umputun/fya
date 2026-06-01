@@ -21,6 +21,7 @@ var (
 		"replay-user-messages": {},
 		"silent":               {},
 		"dbg":                  {},
+		"gate":                 {},
 		"version":              {},
 	}
 	consumedValue = map[string]struct{}{
@@ -120,6 +121,7 @@ type rawOptions struct {
 	Silent             bool          `long:"silent" description:"accepted for compatibility; synthetic tool progress is disabled by default"`
 	IdleTimeout        time.Duration `long:"idle-timeout" default:"2s" description:"transcript idle duration before considering a turn complete"`
 	TurnTimeout        time.Duration `long:"turn-timeout" default:"30m" description:"maximum wall-clock duration for one turn"`
+	Gate               bool          `long:"gate" description:"use unattended gate defaults; sets turn-timeout to 5m unless explicitly supplied"`
 	CWD                string        `long:"cwd" default:"." description:"working directory for the Claude session"`
 	TypingWPM          int           `long:"typing-wpm" default:"100" description:"prompt typing speed in words per minute"`
 	TypingJitter       float64       `long:"typing-jitter" default:"0.20" description:"per-character typing delay jitter ratio (0 disables jitter)"`
@@ -151,9 +153,14 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		return Config{}, fmt.Errorf("parse args: %w", err)
 	}
 
-	claudeArgs, promptArgs, err := newSplitter(args).split()
+	split, err := newSplitter(args).split()
 	if err != nil {
 		return Config{}, err
+	}
+
+	turnTimeout := raw.TurnTimeout
+	if raw.Gate && !split.turnTimeoutExplicit {
+		turnTimeout = 5 * time.Minute
 	}
 
 	cfg := Config{
@@ -162,7 +169,7 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		ReplayUserMessages: raw.ReplayUserMessages,
 		Silent:             raw.Silent,
 		IdleTimeout:        raw.IdleTimeout,
-		TurnTimeout:        raw.TurnTimeout,
+		TurnTimeout:        turnTimeout,
 		CWD:                raw.CWD,
 		TypingWPM:          raw.TypingWPM,
 		TypingJitter:       raw.TypingJitter,
@@ -170,8 +177,8 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		ReadinessTimeout:   raw.ReadinessTimeout,
 		Debug:              raw.Debug,
 		Version:            raw.Version,
-		ClaudeArgs:         claudeArgs,
-		PromptArgs:         promptArgs,
+		ClaudeArgs:         split.claudeArgs,
+		PromptArgs:         split.promptArgs,
 	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -215,17 +222,24 @@ func (c Config) validate() error {
 	return nil
 }
 
+type splitResult struct {
+	claudeArgs          []string
+	promptArgs          []string
+	turnTimeoutExplicit bool
+}
+
 type splitter struct {
-	args   []string
-	claude []string
-	prompt []string
+	args                []string
+	claude              []string
+	prompt              []string
+	turnTimeoutExplicit bool
 }
 
 func newSplitter(args []string) *splitter {
 	return &splitter{args: args}
 }
 
-func (s *splitter) split() ([]string, []string, error) {
+func (s *splitter) split() (splitResult, error) {
 	for i := 0; i < len(s.args); i++ {
 		arg := s.args[i]
 		if arg == "--" {
@@ -239,18 +253,18 @@ func (s *splitter) split() ([]string, []string, error) {
 		if strings.HasPrefix(arg, "--") {
 			next, err := s.splitLong(i)
 			if err != nil {
-				return nil, nil, err
+				return splitResult{}, err
 			}
 			i = next
 			continue
 		}
 		next, err := s.splitShort(i)
 		if err != nil {
-			return nil, nil, err
+			return splitResult{}, err
 		}
 		i = next
 	}
-	return s.claude, s.prompt, nil
+	return splitResult{claudeArgs: s.claude, promptArgs: s.prompt, turnTimeoutExplicit: s.turnTimeoutExplicit}, nil
 }
 
 func (s *splitter) splitLong(i int) (int, error) {
@@ -281,6 +295,9 @@ func (s *splitter) skipLongBool(name string, hasValue bool, i int) (int, error) 
 }
 
 func (s *splitter) skipLongValue(name string, hasValue bool, i int) (int, error) {
+	if name == "turn-timeout" {
+		s.turnTimeoutExplicit = true
+	}
 	if hasValue {
 		return i, nil
 	}
