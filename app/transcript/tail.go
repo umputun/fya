@@ -65,9 +65,9 @@ type Completion struct {
 }
 
 // Done returns true when the turn should terminate: either the current event is
-// a terminal transcript record, or the tracker has seen assistant activity, no
-// tool_use IDs remain pending, no tool_use stop_reason is waiting for a later
-// end_turn, and the idle window has elapsed.
+// a terminal transcript record, or the tracker has seen completion-eligible
+// assistant text, no tool_use IDs remain pending, no tool turn is waiting for a
+// later assistant answer, and the idle window has elapsed.
 func (c Completion) Done(tracker *Tracker, event Event, idleFor time.Duration) bool {
 	if event.Result {
 		return true

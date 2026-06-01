@@ -245,7 +245,9 @@ Initial user prompts and result summaries do not produce assistant text.
 Completion is true when:
 
 - a transcript `result` event or `system`/`turn_duration` record appears, or
-- assistant text has appeared, no tool calls are pending, no `tool_use` stop reason is waiting for a later `end_turn`, and transcript output has been idle for `--idle-timeout`
+- completion-eligible assistant text has appeared, no tool calls are pending, no tool turn is waiting for a later assistant answer, and transcript output has been idle for `--idle-timeout`
+
+Assistant text is completion-eligible only when it is not part of a tool-use event. This lets fya finish when Claude writes a post-tool final answer but omits `stop_reason: "end_turn"`, without finishing immediately after the `tool_result` alone.
 
 If Claude exits before a result event, fya drains the tailer a few more times to catch final transcript writes that landed near process exit. If a result appears during this drain, completion is normal. If not, fya emits an error final result and returns an error.
 

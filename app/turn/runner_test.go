@@ -491,6 +491,60 @@ func TestRunnerWaitsForEndTurnAfterToolUse(t *testing.T) {
 	assert.Equal(t, []string{"I'll look.", "final answer"}, texts)
 }
 
+func TestRunnerCompletesPostToolAnswerWithoutEndTurn(t *testing.T) {
+	var texts []string
+	output := &mocks.OutputMock{
+		TextFunc: func(text string) error {
+			texts = append(texts, text)
+			return nil
+		},
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	calls := 0
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, error) {
+				calls++
+				switch calls {
+				case 1:
+					return []transcript.Event{{Text: "I'll look.", SessionID: "s3", StopReason: "tool_use"}}, nil
+				case 2:
+					return []transcript.Event{{ToolUseIDs: []string{"t1"}, SessionID: "s3", StopReason: "tool_use"}}, nil
+				case 3:
+					return []transcript.Event{{ToolResultIDs: []string{"t1"}, SessionID: "s3"}}, nil
+				case 4:
+					return nil, nil
+				case 5:
+					return []transcript.Event{{Text: "final verdict", SessionID: "s3"}}, nil
+				default:
+					return nil, nil
+				}
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Nanosecond,
+		Prompt:     "hi",
+		PollPeriod: time.Millisecond,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, output.FinalCalls(), 1)
+	assert.Equal(t, []string{"I'll look.", "final verdict"}, texts)
+}
+
 // when claude exits between typing the prompt and the new transcript being
 // flushed, selectTranscript must observe session.Done() rather than poll for
 // the full turn-timeout.

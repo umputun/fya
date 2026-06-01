@@ -92,10 +92,10 @@ func TestTrackerAndCompletion(t *testing.T) {
 	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "with pending tool, completion must wait")
 
 	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
-	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "tool result still needs a later assistant end_turn")
+	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "tool result still needs a later assistant answer")
 
 	tracker.Apply(Event{Text: "answer", StopReason: "end_turn"})
-	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "after end_turn and idle, completion fires")
+	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "after assistant answer and idle, completion fires")
 	assert.True(t, completion.Done(tracker, Event{Result: true}, 0), "explicit result event always completes")
 }
 
@@ -109,6 +109,28 @@ func TestTrackerToolUseWithEndTurnStillWaitsForFollowup(t *testing.T) {
 
 	tracker.Apply(Event{Text: "answer", StopReason: "end_turn"})
 	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "assistant answer after tool result can complete")
+}
+
+func TestTrackerToolTurnCompletesOnPostToolTextWithoutStopReason(t *testing.T) {
+	tracker := NewTracker()
+	completion := Completion{IdleTimeout: time.Second}
+	tracker.Apply(Event{Text: "I'll check", ToolUseIDs: []string{"t1"}, StopReason: "tool_use"})
+	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
+
+	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "tool result alone must not complete")
+
+	tracker.Apply(Event{Text: "verdict"})
+	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "post-tool assistant text can idle-complete without end_turn")
+}
+
+func TestTrackerPreToolTextDoesNotCompleteOnEmptyEndTurn(t *testing.T) {
+	tracker := NewTracker()
+	completion := Completion{IdleTimeout: time.Second}
+	tracker.Apply(Event{Text: "I'll check", ToolUseIDs: []string{"t1"}, StopReason: "tool_use"})
+	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
+	tracker.Apply(Event{Type: "assistant", StopReason: "end_turn"})
+
+	assert.False(t, completion.Done(tracker, Event{}, 2*time.Second), "pre-tool assistant text is not a final answer")
 }
 
 func TestTrackerDoesNotCompleteToolTurnWithoutFollowup(t *testing.T) {

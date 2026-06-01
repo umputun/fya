@@ -171,15 +171,16 @@ func (p *parser) contentText(content any) string {
 	}
 }
 
-// Tracker accumulates per-turn state from a stream of Events: whether assistant
-// text has been seen and which tool_use IDs are still awaiting tool_result.
+// Tracker accumulates per-turn state from a stream of Events: whether
+// completion-eligible assistant text has been seen, which tool_use IDs are still
+// awaiting tool_result, and whether a tool turn still needs a later assistant
+// answer.
 // Apply is the only cross-package entry point; the rest of the state is read
 // internally by Completion.Done.
 type Tracker struct {
-	pending         map[string]struct{}
-	sawAssistant    bool
-	sawStopReason   bool
-	awaitingEndTurn bool
+	pending           map[string]struct{}
+	sawCompletionText bool
+	awaitingAnswer    bool
 }
 
 // NewTracker returns an empty Tracker.
@@ -189,23 +190,20 @@ func NewTracker() *Tracker {
 
 // Apply folds one Event into the tracker.
 func (t *Tracker) Apply(event Event) {
-	if event.Text != "" {
-		t.sawAssistant = true
-	}
-	if event.StopReason != "" {
-		t.sawStopReason = true
-	}
-	if event.StopReason == "end_turn" && len(event.ToolUseIDs) == 0 {
-		t.awaitingEndTurn = false
-	}
-	if event.StopReason == "tool_use" || len(event.ToolUseIDs) > 0 {
-		t.awaitingEndTurn = true
+	hasToolUse := event.StopReason == "tool_use" || len(event.ToolUseIDs) > 0
+	if hasToolUse {
+		t.sawCompletionText = false
+		t.awaitingAnswer = true
 	}
 	for _, id := range event.ToolUseIDs {
 		t.pending[id] = struct{}{}
 	}
 	for _, id := range event.ToolResultIDs {
 		delete(t.pending, id)
+	}
+	if event.Text != "" && !hasToolUse && t.pendingCount() == 0 {
+		t.sawCompletionText = true
+		t.awaitingAnswer = false
 	}
 }
 
@@ -214,7 +212,7 @@ func (t *Tracker) pendingCount() int {
 }
 
 func (t *Tracker) canIdleComplete() bool {
-	return t.sawAssistant && (!t.sawStopReason || !t.awaitingEndTurn)
+	return t.sawCompletionText && !t.awaitingAnswer
 }
 
 func (*parser) stringField(raw map[string]any, name string) string {

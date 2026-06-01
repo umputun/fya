@@ -138,6 +138,9 @@ linters:
           - gosec
         path: _test\.go$
       - linters:
+          - dupl
+        path: mocks/
+      - linters:
           - errcheck
         text: "Error return value of .*.Close.*is not checked"
       - linters:
