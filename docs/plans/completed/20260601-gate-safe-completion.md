@@ -154,8 +154,13 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 **Files:**
 - Move: `docs/plans/20260601-gate-safe-completion.md` to `docs/plans/completed/20260601-gate-safe-completion.md`
 
-- [ ] update this plan with any final implementation notes discovered during execution
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update this plan with any final implementation notes discovered during execution
+- [x] move this plan to `docs/plans/completed/`
+
+## Final Implementation Notes
+
+- Archive task required no code changes or generated artifacts.
+- Final validation passed with `make fmt && make lint && make test && make build` before moving the completed plan.
 
 ## Post-Completion
 
