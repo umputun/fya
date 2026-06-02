@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.4 - 2026-06-02
+
+### Bug Fixes
+
+- Use bracketed paste for multiline paste-mode prompts so large Ralphex prompts are not split before transcript matching.
+- Make unattended gate/cron completion handle delayed or missing Claude terminal metadata, and add `--gate` with a 5m default turn timeout.
+
 ## v0.2.3 - 2026-05-31
 
 ### Bug Fixes
