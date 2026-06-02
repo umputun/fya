@@ -26,7 +26,7 @@ const (
 	// which Claude's TUI intermittently parsed as ESC (standalone) + CR (submit),
 	// fragmenting one multi-line prompt into many message submissions.
 	bracketedPasteStart = "\x1b[200~"
-	bracketedPasteEnd    = "\x1b[201~"
+	bracketedPasteEnd   = "\x1b[201~"
 )
 
 // SleepFunc waits for d or until ctx is canceled; the real implementation uses
