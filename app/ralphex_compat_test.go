@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/umputun/fya/app/options"
 	"github.com/umputun/fya/app/stream"
+	"github.com/umputun/fya/app/turn"
 )
 
 func TestRalphexContractFixture(t *testing.T) {
@@ -81,6 +83,105 @@ func TestRalphexCommandShapeOptions(t *testing.T) {
 	assert.Equal(t, stream.FormatStreamJSON, cfg.OutputFormat)
 	wantClaudeArgs := []string{"--dangerously-skip-permissions", "--verbose", "--model", "opus", "--effort", "high"}
 	assert.Equal(t, wantClaudeArgs, cfg.ClaudeArgs)
+}
+
+func TestStructuredOutputCompatibilityEnvelopeIsObject(t *testing.T) {
+	out := fyaCompatOutput(t, []string{"--print", "--output-format=json", "--json-schema", structuredCompatSchema, "review"},
+		func(_ turnRunnerRequest, w *stream.Writer) error {
+			return w.Final(stream.Result{Result: structuredCompatResult, SessionID: "compat-session"})
+		})
+
+	event := decodeJSONObject(t, out)
+	result, ok := event["result"].(string)
+	require.True(t, ok)
+	assert.JSONEq(t, structuredCompatResult, result)
+
+	structured, ok := event["structured_output"].(map[string]any)
+	require.True(t, ok, "structured_output must be a JSON object, got %T", event["structured_output"])
+	assert.Equal(t, "done", structured["summary"])
+	findings, ok := structured["findings"].([]any)
+	require.True(t, ok)
+	assert.Len(t, findings, 2)
+}
+
+func TestStructuredOutputCompatibilityExtractionShape(t *testing.T) {
+	out := fyaCompatOutput(t, []string{"--print", "--output-format=json", "--json-schema", structuredCompatSchema, "review"},
+		func(_ turnRunnerRequest, w *stream.Writer) error {
+			return w.Final(stream.Result{Result: structuredCompatResult, SessionID: "compat-session"})
+		})
+
+	var envelope struct {
+		StructuredOutput struct {
+			Summary  string   `json:"summary"`
+			Findings []string `json:"findings"`
+		} `json:"structured_output"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(out)), &envelope))
+	assert.Equal(t, "done", envelope.StructuredOutput.Summary)
+	assert.Equal(t, []string{"kept object envelope", "kept ralphex stream-json compatibility"}, envelope.StructuredOutput.Findings)
+}
+
+func TestRalphexStreamJSONCompatibilityWithoutJSONSchema(t *testing.T) {
+	const signal = "<<<RALPHEX:ALL_TASKS_DONE>>>"
+	out := fyaCompatOutput(t, []string{"--print", "--output-format=stream-json", "review"},
+		func(req turnRunnerRequest, w *stream.Writer) error {
+			assert.Nil(t, req.Stream.ValidateStructuredOutput)
+			if err := w.Text("fixed the task\n"); err != nil {
+				return fmt.Errorf("write ralphex text: %w", err)
+			}
+			if err := w.Text(signal); err != nil {
+				return fmt.Errorf("write ralphex signal: %w", err)
+			}
+			return w.Final(stream.Result{})
+		})
+
+	got, err := parseRalphexOutput(out)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed the task\n"+signal, got)
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.Len(t, lines, 3)
+	for _, line := range lines {
+		event := decodeJSONObject(t, line)
+		assert.NotContains(t, event, "structured_output")
+	}
+}
+
+const structuredCompatSchema = `{
+  "type": "object",
+  "required": ["summary", "findings"],
+  "properties": {
+    "summary": {"type": "string"},
+    "findings": {"type": "array", "items": {"type": "string"}}
+  }
+}`
+
+const structuredCompatResult = `{"summary":"done","findings":["kept object envelope","kept ralphex stream-json compatibility"]}`
+
+type compatWriterFunc func(turnRunnerRequest, *stream.Writer) error
+
+func fyaCompatOutput(t *testing.T, args []string, write compatWriterFunc) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	err := execute(t.Context(), testRequest(testReq{
+		args: args, stdout: &stdout, stderr: &stderr,
+		factory: func(req turnRunnerRequest) turnExecutor {
+			return turnRunnerFunc(func(context.Context, turn.Config) error {
+				return write(req, stream.NewWriter(req.Stdout, req.Stream))
+			})
+		},
+	}))
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	return stdout.String()
+}
+
+func decodeJSONObject(t *testing.T, data string) map[string]any {
+	t.Helper()
+	var event map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(data)), &event))
+	return event
 }
 
 type ralphexEvent struct {

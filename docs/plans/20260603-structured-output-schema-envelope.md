@@ -157,11 +157,11 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `app/ralphex_compat_test.go` or create a focused compatibility test file under `app/`
 - Modify: `README.md` only if the test exposes a documented behavior gap
 
-- [ ] add a test fixture using an object schema with required `summary` and `findings` fields
-- [ ] write success tests verifying fya JSON output includes `structured_output` as a JSON object, not as a quoted JSON string
-- [ ] write success tests verifying the Claude extraction shape `{"structured_output": ...}` can be decoded from fya output
-- [ ] write regression tests verifying Ralphex stream-json compatibility behavior is unchanged when `--json-schema` is absent
-- [ ] run tests: `make test`
+- [x] add a test fixture using an object schema with required `summary` and `findings` fields
+- [x] write success tests verifying fya JSON output includes `structured_output` as a JSON object, not as a quoted JSON string
+- [x] write success tests verifying the Claude extraction shape `{"structured_output": ...}` can be decoded from fya output
+- [x] write regression tests verifying Ralphex stream-json compatibility behavior is unchanged when `--json-schema` is absent
+- [x] run tests: `make test`
 
 ### Task 5: Update docs and operator notes
 
