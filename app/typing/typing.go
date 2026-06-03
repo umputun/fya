@@ -93,14 +93,11 @@ func (i *Injector) validate(prompt string) error {
 	return nil
 }
 
-// Type writes prompt rune-by-rune to w, sleeping for a jittered per-rune delay
-// between runes, then a settle delay, then a final submit (carriage return).
-// Newlines inside the prompt emit ESC+CR (a multi-line insertion without
-// submission) so the entire prompt is delivered in one Claude message.
-//
-// When ForcePaste is set, or MaxWPMSize is set and the prompt is longer, Type
-// bypasses per-rune pacing and writes the whole prompt in one shot, like a
-// terminal paste.
+// Type writes prompt to w and submits it with a final carriage return. By
+// default it types rune-by-rune with jittered delays; newlines emit ESC+CR so
+// the whole prompt stays in one Claude message. When ForcePaste is set, or
+// MaxWPMSize is set and the prompt is longer, Type uses bracketed paste instead
+// of per-rune pacing.
 func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 	if w == nil {
 		return errors.New("typing writer is nil")
