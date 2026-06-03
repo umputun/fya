@@ -124,14 +124,14 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `go.mod`
 - Modify: `go.sum`
 
-- [ ] add JSON Schema validator dependency supporting draft-07, preferably `github.com/santhosh-tekuri/jsonschema/v6`
-- [ ] implement `schemaoutput.NewValidator(schema string) (func(string) (json.RawMessage, error), error)`
-- [ ] implement `schemaoutput.Instruction(schema string) string`
-- [ ] validate schema and build the validation hook in `run` before starting the Claude child process
-- [ ] append the structured-output instruction to the prompt only when `JSONSchema` is set
-- [ ] write success tests for valid schema setup, valid instance validation, prompt instruction construction, and unchanged prompt when schema mode is absent
-- [ ] write error/edge tests for invalid schema preflight failure, invalid JSON output, schema mismatch, and schema-allowed non-object JSON values
-- [ ] run tests: `make test`
+- [x] add JSON Schema validator dependency supporting draft-07, preferably `github.com/santhosh-tekuri/jsonschema/v6`
+- [x] implement `schemaoutput.NewValidator(schema string) (func(string) (json.RawMessage, error), error)`
+- [x] implement `schemaoutput.Instruction(schema string) string`
+- [x] validate schema and build the validation hook in `run` before starting the Claude child process
+- [x] append the structured-output instruction to the prompt only when `JSONSchema` is set
+- [x] write success tests for valid schema setup, valid instance validation, prompt instruction construction, and unchanged prompt when schema mode is absent
+- [x] write error/edge tests for invalid schema preflight failure, invalid JSON output, schema mismatch, and schema-allowed non-object JSON values
+- [x] run tests: `make test`
 
 ### Task 3: Wire structured output through stream JSON results
 

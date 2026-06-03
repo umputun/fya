@@ -17,6 +17,7 @@ import (
 	"github.com/umputun/fya/app/input"
 	"github.com/umputun/fya/app/options"
 	"github.com/umputun/fya/app/ready"
+	"github.com/umputun/fya/app/schemaoutput"
 	"github.com/umputun/fya/app/stream"
 	"github.com/umputun/fya/app/transcript"
 	"github.com/umputun/fya/app/turn"
@@ -125,6 +126,13 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 	}).Read()
 	if err != nil {
 		return fmt.Errorf("read prompt: %w", err)
+	}
+
+	if cfg.JSONSchema != "" {
+		if _, err := schemaoutput.NewValidator(cfg.JSONSchema); err != nil {
+			return fmt.Errorf("prepare structured output: %w", err)
+		}
+		prompt += schemaoutput.Instruction(cfg.JSONSchema)
 	}
 
 	if err := req.Factory(req.Stdout, req.Stderr, cfg).Run(ctx, turn.Config{
