@@ -195,8 +195,8 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `docs/plans/20260603-structured-output-schema-envelope.md`
 - Move: `docs/plans/20260603-structured-output-schema-envelope.md` to `docs/plans/completed/20260603-structured-output-schema-envelope.md`
 
-- [ ] update project guidance if implementation discovers durable patterns worth remembering
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update project guidance if implementation discovers durable patterns worth remembering (none discovered)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention or external systems. No checkboxes.*
