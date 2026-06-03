@@ -8,7 +8,7 @@ The design is intentionally ephemeral:
 - one prompt
 - one interactive `claude` child process
 - one transcript file selected and tailed
-- one final result event after the prompt is accepted for a turn; startup/readiness/typing failures return errors before transcript streaming begins
+- one final result event, normally after the prompt is accepted for a turn; if fya's turn timeout fires during startup/readiness/typing, an error final result is emitted before transcript streaming begins
 - cleanup of the Claude process group before returning
 
 ## High-Level Flow
