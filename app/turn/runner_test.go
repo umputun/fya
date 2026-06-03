@@ -1055,8 +1055,11 @@ func TestRunnerTimeout(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, turn.ErrTurnTimeout)
 	require.Len(t, output.FinalCalls(), 1)
 	assert.True(t, output.FinalCalls()[0].Result.IsError)
+	assert.Equal(t, "fya_turn_timeout", output.FinalCalls()[0].Result.TerminalReason)
+	assert.Contains(t, output.FinalCalls()[0].Result.Result, "FYA_TRANSIENT_TIMEOUT")
 }
 
 func newSessionMock() *mocks.SessionMock {

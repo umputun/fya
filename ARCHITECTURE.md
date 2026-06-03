@@ -283,6 +283,8 @@ Example:
 
 Cancellation flows through `turn.Runner` into the PTY process. The PTY driver kills the Claude process group on context cancellation because timeout/cancel paths prioritize not leaking child processes. Normal completed turns use graceful `Close` instead.
 
+When fya's own `--turn-timeout` fires, the returned error and the error final result include the stable marker `FYA_TRANSIENT_TIMEOUT` with `terminal_reason: "fya_turn_timeout"`. Orchestrators such as Ralphex can classify this as a transient Claude continuation stall and retry it without matching generic `context deadline exceeded` text.
+
 ## Diagnostics
 
 Use stderr for diagnosis:

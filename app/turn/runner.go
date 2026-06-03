@@ -17,6 +17,11 @@ import (
 	"github.com/umputun/fya/app/transcript"
 )
 
+// ErrTurnTimeout marks fya's own wall-clock turn timeout. Downstream
+// orchestrators can use this stable marker to classify the failed turn as a
+// transient Claude continuation stall instead of a generic process failure.
+var ErrTurnTimeout = errors.New("FYA_TRANSIENT_TIMEOUT: claude turn did not complete before fya turn timeout")
+
 //go:generate moq -out mocks/session.go -pkg mocks -skip-ensure -fmt goimports . Session
 //go:generate moq -out mocks/process_starter.go -pkg mocks -skip-ensure -fmt goimports . ProcessStarter
 //go:generate moq -out mocks/readiness.go -pkg mocks -skip-ensure -fmt goimports . Readiness
@@ -139,7 +144,8 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 	// indefinitely. The PTY driver's watchCancel will kill the process group.
 	if cfg.TurnTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.TurnTimeout)
+		ctx, cancel = context.WithTimeoutCause(ctx, cfg.TurnTimeout,
+			fmt.Errorf("%w after %s", ErrTurnTimeout, cfg.TurnTimeout))
 		defer cancel()
 	}
 
@@ -162,7 +168,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 
 	path, err := r.selectTranscript(ctx, cfg, session.Done())
 	if err != nil {
-		if finalErr := r.output.Final(stream.Result{IsError: true, Subtype: "error"}); finalErr != nil {
+		if finalErr := r.output.Final(r.cancelResult("", ctx)); finalErr != nil {
 			return fmt.Errorf("write final output: %w", finalErr)
 		}
 		return err
@@ -197,7 +203,7 @@ func (r *Runner) selectTranscript(ctx context.Context, cfg Config, sessionDone <
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("select transcript: %w", ctx.Err())
+			return "", fmt.Errorf("select transcript: %w", r.ctxError(ctx))
 		case <-sessionDone:
 			return "", errors.New("select transcript: claude exited before transcript was written")
 		case <-ticker.C:
@@ -252,10 +258,10 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 		}
 		select {
 		case <-ctx.Done():
-			if err := r.output.Final(stream.Result{SessionID: lastEvent.SessionID, IsError: true, Subtype: "error"}); err != nil {
+			if err := r.output.Final(r.cancelResult(lastEvent.SessionID, ctx)); err != nil {
 				return fmt.Errorf("write final output: %w", err)
 			}
-			return fmt.Errorf("turn canceled: %w", ctx.Err())
+			return fmt.Errorf("turn canceled: %w", r.ctxError(ctx))
 		case <-sessionDone:
 			return r.handleSessionExit(ctx, req.tailer, state)
 		case <-ticker.C:
@@ -339,10 +345,10 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 		if attempt+1 < drainRetries {
 			select {
 			case <-ctx.Done():
-				if err := r.output.Final(stream.Result{SessionID: s.lastEvent.SessionID, IsError: true, Subtype: "error"}); err != nil {
+				if err := r.output.Final(r.cancelResult(s.lastEvent.SessionID, ctx)); err != nil {
 					return fmt.Errorf("write final output after session exit: %w", err)
 				}
-				return fmt.Errorf("turn canceled: %w", ctx.Err())
+				return fmt.Errorf("turn canceled: %w", r.ctxError(ctx))
 			case <-time.After(drainRetryDelay):
 			}
 		}
@@ -361,6 +367,24 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 		return fmt.Errorf("write final output after session exit: %w", err)
 	}
 	return errors.New("claude exited before turn completion")
+}
+
+func (r *Runner) cancelResult(sessionID string, ctx context.Context) stream.Result {
+	result := stream.Result{SessionID: sessionID, IsError: true, Subtype: "error", TerminalReason: "error"}
+	if cause := context.Cause(ctx); errors.Is(cause, ErrTurnTimeout) {
+		result.TerminalReason = "fya_turn_timeout"
+		result.Result = cause.Error()
+	}
+	return result
+}
+
+func (r *Runner) ctxError(ctx context.Context) error {
+	err := ctx.Err()
+	cause := context.Cause(ctx)
+	if cause == nil || errors.Is(cause, err) {
+		return fmt.Errorf("context error: %w", err)
+	}
+	return fmt.Errorf("context error: %w: %w", err, cause)
 }
 
 func (r *Runner) validate() error {
