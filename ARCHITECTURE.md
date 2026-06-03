@@ -8,7 +8,7 @@ The design is intentionally ephemeral:
 - one prompt
 - one interactive `claude` child process
 - one transcript file selected and tailed
-- one final result event after the prompt is accepted for a turn; startup/readiness/typing failures return errors before transcript streaming begins
+- one final result event, normally after the prompt is accepted for a turn; if fya's turn timeout fires during startup/readiness/typing/transcript selection, an error final result is emitted before transcript streaming begins
 - cleanup of the Claude process group before returning
 
 ## High-Level Flow
@@ -282,6 +282,8 @@ Example:
 - cleanup stops signal delivery and waits for the signal goroutine to exit
 
 Cancellation flows through `turn.Runner` into the PTY process. The PTY driver kills the Claude process group on context cancellation because timeout/cancel paths prioritize not leaking child processes. Normal completed turns use graceful `Close` instead.
+
+When fya's own `--turn-timeout` fires, the returned error and the error final result include the stable marker `FYA_TRANSIENT_TIMEOUT` with `terminal_reason: "fya_turn_timeout"`. Orchestrators such as Ralphex can classify this as a transient Claude continuation stall and retry it without matching generic `context deadline exceeded` text.
 
 ## Diagnostics
 

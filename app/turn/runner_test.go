@@ -1032,6 +1032,84 @@ func TestRunnerValidateNilDeps(t *testing.T) {
 	}
 }
 
+func TestRunnerStartTimeout(t *testing.T) {
+	output := &mocks.OutputMock{FinalFunc: func(stream.Result) error { return nil }}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(ctx context.Context, _ ptyrun.Config) (turn.Session, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}},
+		Readiness:     &mocks.ReadinessMock{},
+		Injector:      &mocks.InjectorMock{},
+		Catalog:       &mocks.CatalogMock{},
+		TailerFactory: noopTailerFactory,
+		Output:        output,
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	err := runner.Run(ctx, turn.Config{CWD: ".", TurnTimeout: time.Millisecond, Prompt: "hello"})
+
+	assert.Contains(t, err.Error(), "start claude pty")
+	assertTurnTimeoutFinal(t, err, output)
+}
+
+func TestRunnerReadinessTimeout(t *testing.T) {
+	session := newSessionMock()
+	output := &mocks.OutputMock{FinalFunc: func(stream.Result) error { return nil }}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return session, nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(ctx context.Context, _ ready.Source) (ready.Result, error) {
+			<-ctx.Done()
+			return ready.Result{}, ctx.Err()
+		}},
+		Injector:      &mocks.InjectorMock{},
+		Catalog:       &mocks.CatalogMock{},
+		TailerFactory: noopTailerFactory,
+		Output:        output,
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	err := runner.Run(ctx, turn.Config{CWD: ".", TurnTimeout: time.Millisecond, Prompt: "hello"})
+
+	assert.Contains(t, err.Error(), "wait claude readiness")
+	assertTurnTimeoutFinal(t, err, output)
+	assert.Len(t, session.CloseCalls(), 1)
+	assert.Len(t, session.WaitCalls(), 1)
+}
+
+func TestRunnerInjectTimeout(t *testing.T) {
+	session := newSessionMock()
+	output := &mocks.OutputMock{FinalFunc: func(stream.Result) error { return nil }}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return session, nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(ctx context.Context, _ io.Writer, _ string) error {
+			<-ctx.Done()
+			return fmt.Errorf("type canceled: %w", ctx.Err())
+		}},
+		Catalog:       &mocks.CatalogMock{},
+		TailerFactory: noopTailerFactory,
+		Output:        output,
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	err := runner.Run(ctx, turn.Config{CWD: ".", TurnTimeout: time.Millisecond, Prompt: "hello"})
+
+	assert.Contains(t, err.Error(), "type prompt")
+	assertTurnTimeoutFinal(t, err, output)
+	assert.Len(t, session.CloseCalls(), 1)
+	assert.Len(t, session.WaitCalls(), 1)
+}
+
 func TestRunnerTimeout(t *testing.T) {
 	output := &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }}
 	runner := turn.NewRunner(turn.Dependencies{
@@ -1050,13 +1128,23 @@ func TestRunnerTimeout(t *testing.T) {
 		},
 		Output: output,
 	})
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
 
-	err := runner.Run(t.Context(), turn.Config{CWD: ".", TurnTimeout: time.Millisecond, Prompt: "hello", PollPeriod: time.Hour})
+	err := runner.Run(ctx, turn.Config{CWD: ".", TurnTimeout: time.Millisecond, Prompt: "hello", PollPeriod: time.Hour})
 
+	assertTurnTimeoutFinal(t, err, output)
+}
+
+func assertTurnTimeoutFinal(t *testing.T, err error, output *mocks.OutputMock) {
+	t.Helper()
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, turn.ErrTurnTimeout)
 	require.Len(t, output.FinalCalls(), 1)
 	assert.True(t, output.FinalCalls()[0].Result.IsError)
+	assert.Equal(t, "fya_turn_timeout", output.FinalCalls()[0].Result.TerminalReason)
+	assert.Contains(t, output.FinalCalls()[0].Result.Result, "FYA_TRANSIENT_TIMEOUT")
 }
 
 func newSessionMock() *mocks.SessionMock {
