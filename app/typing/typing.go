@@ -46,9 +46,10 @@ type Config struct {
 	WarnThreshold time.Duration
 	TurnTimeout   time.Duration
 	// MaxWPMSize is the prompt-length threshold in words above which the prompt
-	// is pasted in one write instead of typed rune-by-rune. 0 disables pasting
-	// and always types.
+	// is pasted in one write instead of typed rune-by-rune. 0 disables threshold
+	// pasting and always types unless ForcePaste is set.
 	MaxWPMSize int
+	ForcePaste bool
 	Warn       io.Writer
 	Sleeper    SleepFunc
 	Rand       JitterFunc
@@ -97,8 +98,9 @@ func (i *Injector) validate(prompt string) error {
 // Newlines inside the prompt emit ESC+CR (a multi-line insertion without
 // submission) so the entire prompt is delivered in one Claude message.
 //
-// When MaxWPMSize is set and the prompt is longer, Type bypasses per-rune pacing
-// and writes the whole prompt in one shot, like a terminal paste.
+// When ForcePaste is set, or MaxWPMSize is set and the prompt is longer, Type
+// bypasses per-rune pacing and writes the whole prompt in one shot, like a
+// terminal paste.
 func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 	if w == nil {
 		return errors.New("typing writer is nil")
@@ -127,10 +129,9 @@ func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 }
 
 // pasteMode reports whether the prompt should be pasted in one shot instead of
-// typed rune-by-rune. It is enabled only when MaxWPMSize is positive and the
-// prompt has more words than that threshold.
+// typed rune-by-rune.
 func (i *Injector) pasteMode(prompt string) bool {
-	return i.cfg.MaxWPMSize > 0 && len(strings.Fields(prompt)) > i.cfg.MaxWPMSize
+	return i.cfg.ForcePaste || (i.cfg.MaxWPMSize > 0 && len(strings.Fields(prompt)) > i.cfg.MaxWPMSize)
 }
 
 // paste writes the whole prompt in a single write without per-rune pacing,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	log "github.com/go-pkgz/lgr"
@@ -234,6 +235,8 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 	sessionDone := req.session.Done()
 	lastTranscriptActivityAt := time.Now()
 	var lastEvent transcript.Event
+	var finalText strings.Builder
+	var hasFinalText bool
 
 	for {
 		events, activity, err := req.tailer.ReadNew()
@@ -251,6 +254,8 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			lastEvent:    &lastEvent,
 			completion:   completion,
 			streamEvents: req.cfg.StreamEvents,
+			finalText:    &finalText,
+			hasFinalText: &hasFinalText,
 		}
 		done, err := r.applyEvents(events, state)
 		if err != nil {
@@ -260,7 +265,7 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			return nil
 		}
 		if completion.Done(tracker, lastEvent, time.Since(lastTranscriptActivityAt)) {
-			if err := r.output.Final(stream.Result{SessionID: lastEvent.SessionID}); err != nil {
+			if err := r.output.Final(state.finalResult(lastEvent.SessionID)); err != nil {
 				return fmt.Errorf("write final output: %w", err)
 			}
 			return nil
@@ -284,6 +289,34 @@ type applyState struct {
 	lastEvent    *transcript.Event
 	completion   transcript.Completion
 	streamEvents bool
+	finalText    *strings.Builder
+	hasFinalText *bool
+}
+
+func (s applyState) trackFinalText(event transcript.Event) {
+	if s.finalText == nil || s.hasFinalText == nil {
+		return
+	}
+	if event.StopReason == "tool_use" || len(event.ToolUseIDs) > 0 {
+		s.finalText.Reset()
+		*s.hasFinalText = true
+		return
+	}
+	if event.Text == "" {
+		return
+	}
+	s.finalText.WriteString(event.Text)
+	*s.hasFinalText = true
+}
+
+func (s applyState) finalResult(sessionID string) stream.Result {
+	result := stream.Result{SessionID: sessionID}
+	if s.finalText == nil || s.hasFinalText == nil {
+		return result
+	}
+	result.FinalText = s.finalText.String()
+	result.HasFinalText = *s.hasFinalText
+	return result
 }
 
 // applyEvents folds a batch of events through the tracker, emits text deltas,
@@ -294,6 +327,7 @@ func (r *Runner) applyEvents(events []transcript.Event, s applyState) (bool, err
 	for _, event := range events {
 		*s.lastEvent = event
 		s.tracker.Apply(event)
+		s.trackFinalText(event)
 		emittedEvent := false
 		if s.streamEvents && len(event.Message) > 0 {
 			if err := r.output.Event(stream.Event{Type: event.Type, SessionID: event.SessionID, Message: event.Message}); err != nil {
@@ -307,7 +341,7 @@ func (r *Runner) applyEvents(events []transcript.Event, s applyState) (bool, err
 			}
 		}
 		if s.completion.Done(s.tracker, event, 0) {
-			if err := r.output.Final(stream.Result{SessionID: event.SessionID}); err != nil {
+			if err := r.output.Final(s.finalResult(event.SessionID)); err != nil {
 				return false, fmt.Errorf("write final output: %w", err)
 			}
 			return true, nil
@@ -363,7 +397,7 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 		}
 	}
 	if s.completion.Done(s.tracker, *s.lastEvent, s.completion.IdleTimeout) {
-		if err := r.output.Final(stream.Result{SessionID: s.lastEvent.SessionID}); err != nil {
+		if err := r.output.Final(s.finalResult(s.lastEvent.SessionID)); err != nil {
 			return fmt.Errorf("write final output after session exit: %w", err)
 		}
 		return nil

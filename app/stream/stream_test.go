@@ -103,7 +103,8 @@ func TestJSONOutputWithStructuredOutput(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, w.Final(Result{Result: `{"summary":"done"}`, TerminalReason: "stop"}))
+	require.NoError(t, w.Text(`{"summary":"done"}`))
+	require.NoError(t, w.Final(Result{TerminalReason: "stop"}))
 
 	event := decodeLine(t, strings.TrimSpace(out.String()))
 	assert.Equal(t, "result", event["type"])
@@ -114,6 +115,29 @@ func TestJSONOutputWithStructuredOutput(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "done", structured["summary"])
 	assert.Equal(t, "stop", event["terminal_reason"])
+}
+
+func TestJSONStructuredOutputValidatesFinalTextSource(t *testing.T) {
+	var out bytes.Buffer
+	var got string
+	w := NewWriter(&out, Config{
+		Format: FormatJSON,
+		ValidateStructuredOutput: func(text string) (json.RawMessage, error) {
+			got = text
+			return json.RawMessage(text), nil
+		},
+	})
+
+	require.NoError(t, w.Text("I'll check."))
+	require.NoError(t, w.Text(`{"summary":"done"}`))
+	require.NoError(t, w.Final(Result{FinalText: `{"summary":"done"}`, HasFinalText: true}))
+
+	assert.JSONEq(t, `{"summary":"done"}`, got)
+	event := decodeLine(t, strings.TrimSpace(out.String()))
+	assert.Equal(t, `I'll check.{"summary":"done"}`, event["result"])
+	structured, ok := event["structured_output"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "done", structured["summary"])
 }
 
 func TestJSONStructuredOutputValidationFailure(t *testing.T) {

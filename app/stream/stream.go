@@ -41,6 +41,8 @@ type Result struct {
 	SessionID      string `json:"session_id,omitempty"`
 	NumTurns       int    `json:"num_turns"`
 	TerminalReason string `json:"terminal_reason"`
+	FinalText      string `json:"-"`
+	HasFinalText   bool   `json:"-"`
 }
 
 // Writer serializes Claude-compatible print-mode events to an io.Writer. Final
@@ -193,24 +195,26 @@ func (w *Writer) writeText(text string) error {
 }
 
 func (w *Writer) writeJSONResult(result Result) error {
-	obj, err := w.jsonResultObject(result)
-	if writeErr := w.writeJSON(obj); writeErr != nil {
-		return writeErr
-	}
-	return err
-}
-
-func (w *Writer) jsonResultObject(result Result) (map[string]any, error) {
 	obj := w.resultObject(result)
 	if result.IsError || w.cfg.ValidateStructuredOutput == nil {
-		return obj, nil
+		return w.writeJSON(obj)
 	}
-	raw, err := w.cfg.ValidateStructuredOutput(result.Result)
+	raw, err := w.cfg.ValidateStructuredOutput(w.structuredOutputText(result))
 	if err != nil {
-		return w.validationErrorObject(result, err), fmt.Errorf("validate structured output: %w", err)
+		if writeErr := w.writeJSON(w.validationErrorObject(result, err)); writeErr != nil {
+			return writeErr
+		}
+		return fmt.Errorf("validate structured output: %w", err)
 	}
 	obj["structured_output"] = raw
-	return obj, nil
+	return w.writeJSON(obj)
+}
+
+func (w *Writer) structuredOutputText(result Result) string {
+	if result.HasFinalText {
+		return result.FinalText
+	}
+	return result.Result
 }
 
 func (w *Writer) validationErrorObject(result Result, err error) map[string]any {

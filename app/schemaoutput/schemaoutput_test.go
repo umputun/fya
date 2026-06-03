@@ -59,7 +59,63 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	_, err = validate(`{"summary":7}`)
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "validate structured output")
+	assert.NotContains(t, err.Error(), "validate structured output: validate structured output")
+}
+
+func TestValidatorPreservesLargeIntegerPrecision(t *testing.T) {
+	validate, err := NewValidator(`{"const":9007199254740993}`)
+	require.NoError(t, err)
+
+	_, err = validate(`9007199254740992`)
+	require.Error(t, err)
+
+	raw, err := validate(`9007199254740993`)
+	require.NoError(t, err)
+	assert.Equal(t, `9007199254740993`, string(raw))
+}
+
+func TestValidatorSupportsDraft7Conditionals(t *testing.T) {
+	schema := `{"if":{"properties":{"kind":{"const":"count"}},"required":["kind"]},` +
+		`"then":{"required":["count"]},"else":{"required":["name"]}}`
+	validate, err := NewValidator(schema)
+	require.NoError(t, err)
+
+	_, err = validate(`{"kind":"count","name":"missing count"}`)
+	require.Error(t, err)
+
+	raw, err := validate(`{"kind":"count","count":1}`)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"kind":"count","count":1}`, string(raw))
+}
+
+func TestValidatorRejectsEmptyOutput(t *testing.T) {
+	validate, err := NewValidator(objectSchema)
+	require.NoError(t, err)
+
+	_, err = validate("  \n\t ")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "structured output is empty")
+}
+
+func TestValidatorRejectsMultipleTopLevelValues(t *testing.T) {
+	validate, err := NewValidator(objectSchema)
+	require.NoError(t, err)
+
+	_, err = validate(`{"summary":"done"}{"summary":"again"}`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be exactly one JSON value")
+}
+
+func TestValidatorRejectsTrailingNonWhitespace(t *testing.T) {
+	validate, err := NewValidator(objectSchema)
+	require.NoError(t, err)
+
+	_, err = validate(`{"summary":"done"} nope`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse structured output JSON")
 }
 
 func TestValidatorAllowsSchemaValidNonObjectJSON(t *testing.T) {

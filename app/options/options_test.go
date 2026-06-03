@@ -228,6 +228,8 @@ func TestParseRejectsJSONSchemaUnsupportedFormats(t *testing.T) {
 		args []string
 		want string
 	}{
+		{name: "empty equals", args: []string{"--output-format=json", "--json-schema="}, want: "json-schema requires a non-empty value"},
+		{name: "empty separate", args: []string{"--output-format=json", "--json-schema", ""}, want: "json-schema requires a non-empty value"},
 		{name: "default output text", args: []string{"--json-schema", schema}, want: "json-schema requires --output-format=json"},
 		{name: "stream json output", args: []string{"--output-format=stream-json", "--json-schema", schema}, want: "json-schema requires --output-format=json"},
 		{

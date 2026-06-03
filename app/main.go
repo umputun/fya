@@ -34,19 +34,18 @@ type turnExecutor interface {
 type turnRunnerFactory func(turnRunnerRequest) turnExecutor
 
 type turnRunnerRequest struct {
-	Stdout  io.Writer
-	Stderr  io.Writer
-	Options options.Config
-	Stream  stream.Config
+	Stdout                   io.Writer
+	Stderr                   io.Writer
+	Options                  options.Config
+	ValidateStructuredOutput func(string) (json.RawMessage, error)
 }
 
 func defaultTurnRunner(req turnRunnerRequest) turnExecutor {
 	cfg := req.Options
-	streamCfg := req.Stream
-	if streamCfg.Format == "" {
-		streamCfg.Format = cfg.OutputFormat
-	}
-	output := stream.NewWriter(req.Stdout, streamCfg)
+	output := stream.NewWriter(req.Stdout, stream.Config{
+		Format:                   cfg.OutputFormat,
+		ValidateStructuredOutput: req.ValidateStructuredOutput,
+	})
 	return turn.NewRunner(turn.Dependencies{
 		ProcessStarter: turn.NewPTYStarter(),
 		Readiness: ready.NewDetector(ready.Config{
@@ -54,19 +53,24 @@ func defaultTurnRunner(req turnRunnerRequest) turnExecutor {
 			Warn:            req.Stderr,
 			NonFatalTimeout: true,
 		}),
-		Injector: typing.NewInjector(typing.Config{
-			WPM:         cfg.TypingWPM,
-			Jitter:      cfg.TypingJitter,
-			MaxWPMSize:  cfg.MaxWPMSize,
-			TurnTimeout: cfg.TurnTimeout,
-			Warn:        req.Stderr,
-		}),
-		Catalog: transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
+		Injector: typing.NewInjector(typingConfig(cfg, req.Stderr)),
+		Catalog:  transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
 		TailerFactory: func(path string) turn.Tailer {
 			return transcript.NewTailer(path)
 		},
 		Output: output,
 	})
+}
+
+func typingConfig(cfg options.Config, warn io.Writer) typing.Config {
+	return typing.Config{
+		WPM:         cfg.TypingWPM,
+		Jitter:      cfg.TypingJitter,
+		MaxWPMSize:  cfg.MaxWPMSize,
+		ForcePaste:  cfg.JSONSchema != "",
+		TurnTimeout: cfg.TurnTimeout,
+		Warn:        warn,
+	}
 }
 
 // request groups the per-invocation inputs to execute/run.
@@ -152,13 +156,10 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 	}
 
 	runnerReq := turnRunnerRequest{
-		Stdout:  req.Stdout,
-		Stderr:  req.Stderr,
-		Options: cfg,
-		Stream: stream.Config{
-			Format:                   cfg.OutputFormat,
-			ValidateStructuredOutput: validateStructuredOutput,
-		},
+		Stdout:                   req.Stdout,
+		Stderr:                   req.Stderr,
+		Options:                  cfg,
+		ValidateStructuredOutput: validateStructuredOutput,
 	}
 	if err := req.Factory(runnerReq).Run(ctx, turn.Config{
 		ClaudeArgs:   cfg.ClaudeArgs,

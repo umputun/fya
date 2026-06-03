@@ -102,6 +102,18 @@ func TestTypePasteDisabledByDefault(t *testing.T) {
 	assert.Len(t, sleep.delays, 8, "MaxWPMSize=0 disables paste, all runes typed (7 runes + settle)")
 }
 
+func TestTypeForcePasteIgnoresThreshold(t *testing.T) {
+	sleep := &fakeSleeper{}
+	var out bytes.Buffer
+
+	err := NewInjector(Config{ForcePaste: true, MaxWPMSize: 0, SettleDelay: time.Millisecond, Sleeper: sleep.sleep}).
+		Type(t.Context(), &out, "one")
+
+	require.NoError(t, err)
+	assert.Equal(t, "\x1b[200~one\x1b[201~\r", out.String())
+	assert.Len(t, sleep.delays, 1)
+}
+
 func TestTypePasteSkipsTurnTimeoutGuard(t *testing.T) {
 	var out bytes.Buffer
 

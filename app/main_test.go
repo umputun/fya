@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/umputun/fya/app/options"
 	"github.com/umputun/fya/app/schemaoutput"
-	"github.com/umputun/fya/app/stream"
 	"github.com/umputun/fya/app/turn"
 )
 
@@ -40,9 +40,18 @@ func TestExecuteVersion(t *testing.T) {
 func TestDefaultTurnRunner(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	runner := defaultTurnRunner(turnRunnerRequest{Stdout: &stdout, Stderr: &stderr, Options: options.Config{}, Stream: stream.Config{}})
+	runner := defaultTurnRunner(turnRunnerRequest{Stdout: &stdout, Stderr: &stderr, Options: options.Config{}})
 
 	assert.NotNil(t, runner)
+}
+
+func TestTypingConfigForcesPasteWithJSONSchema(t *testing.T) {
+	cfg := options.Config{JSONSchema: `{"type":"object"}`, MaxWPMSize: 0}
+
+	got := typingConfig(cfg, io.Discard)
+
+	assert.True(t, got.ForcePaste)
+	assert.Equal(t, 0, got.MaxWPMSize)
 }
 
 func TestExecuteMissingPrompt(t *testing.T) {
@@ -118,23 +127,23 @@ func TestRunAppendsJSONSchemaInstruction(t *testing.T) {
 	assert.Equal(t, "hello"+schemaoutput.Instruction(schema), gotPrompt)
 }
 
-func TestRunPassesJSONSchemaValidatorToStreamConfig(t *testing.T) {
-	var got stream.Config
+func TestRunPassesJSONSchemaValidatorToRunnerRequest(t *testing.T) {
+	var got func(string) (json.RawMessage, error)
 	var stdout, stderr bytes.Buffer
 	schema := `{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`
 	cfg := optionsConfig("hello")
 	cfg.OutputFormat = "json"
 	cfg.JSONSchema = schema
 	factory := func(req turnRunnerRequest) turnExecutor {
-		got = req.Stream
+		got = req.ValidateStructuredOutput
 		return turnRunnerFunc(func(context.Context, turn.Config) error { return nil })
 	}
 
 	err := run(t.Context(), cfg, testRequest(testReq{stdout: &stdout, stderr: &stderr, factory: factory}))
 
 	require.NoError(t, err)
-	require.NotNil(t, got.ValidateStructuredOutput)
-	raw, err := got.ValidateStructuredOutput(`{"summary":"done"}`)
+	require.NotNil(t, got)
+	raw, err := got(`{"summary":"done"}`)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"summary":"done"}`, string(raw))
 }
@@ -152,20 +161,19 @@ func TestRunKeepsPromptUnchangedWithoutJSONSchema(t *testing.T) {
 }
 
 func TestRunLeavesStructuredValidatorUnsetWithoutJSONSchema(t *testing.T) {
-	var got stream.Config
+	var got func(string) (json.RawMessage, error)
 	var stdout, stderr bytes.Buffer
 	cfg := optionsConfig("hello")
 	cfg.OutputFormat = "json"
 	factory := func(req turnRunnerRequest) turnExecutor {
-		got = req.Stream
+		got = req.ValidateStructuredOutput
 		return turnRunnerFunc(func(context.Context, turn.Config) error { return nil })
 	}
 
 	err := run(t.Context(), cfg, testRequest(testReq{stdout: &stdout, stderr: &stderr, factory: factory}))
 
 	require.NoError(t, err)
-	assert.Equal(t, stream.FormatJSON, got.Format)
-	assert.Nil(t, got.ValidateStructuredOutput)
+	assert.Nil(t, got)
 }
 
 func TestRunRejectsInvalidJSONSchemaBeforeTurn(t *testing.T) {

@@ -805,8 +805,11 @@ func TestRunnerSessionExitDrainCompletesFinalAssistantText(t *testing.T) {
 
 	require.NoError(t, res.err)
 	require.Len(t, res.output.FinalCalls(), 1)
-	assert.False(t, res.output.FinalCalls()[0].Result.IsError)
-	assert.Equal(t, "s5", res.output.FinalCalls()[0].Result.SessionID)
+	result := res.output.FinalCalls()[0].Result
+	assert.False(t, result.IsError)
+	assert.Equal(t, "s5", result.SessionID)
+	assert.True(t, result.HasFinalText)
+	assert.Equal(t, "final answer", result.FinalText)
 	assert.Equal(t, []string{"final answer"}, res.texts)
 }
 
@@ -832,8 +835,11 @@ func TestRunnerSessionExitDrainCompletesPostToolFinalAssistantText(t *testing.T)
 
 	require.NoError(t, res.err)
 	require.Len(t, res.output.FinalCalls(), 1)
-	assert.False(t, res.output.FinalCalls()[0].Result.IsError)
-	assert.Equal(t, "s6", res.output.FinalCalls()[0].Result.SessionID)
+	result := res.output.FinalCalls()[0].Result
+	assert.False(t, result.IsError)
+	assert.Equal(t, "s6", result.SessionID)
+	assert.True(t, result.HasFinalText)
+	assert.Equal(t, "final verdict", result.FinalText)
 	assert.Equal(t, []string{"I'll check.", "final verdict"}, res.texts)
 }
 

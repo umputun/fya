@@ -159,6 +159,9 @@ func (p *Parser) Parse(args []string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if split.jsonSchemaExplicit && raw.JSONSchema == "" {
+		return Config{}, errors.New("json-schema requires a non-empty value")
+	}
 
 	turnTimeout := raw.TurnTimeout
 	if raw.Gate && !split.turnTimeoutExplicit {
@@ -235,6 +238,7 @@ type splitResult struct {
 	claudeArgs          []string
 	promptArgs          []string
 	turnTimeoutExplicit bool
+	jsonSchemaExplicit  bool
 }
 
 type splitter struct {
@@ -242,6 +246,7 @@ type splitter struct {
 	claude              []string
 	prompt              []string
 	turnTimeoutExplicit bool
+	jsonSchemaExplicit  bool
 }
 
 func newSplitter(args []string) *splitter {
@@ -273,7 +278,12 @@ func (s *splitter) split() (splitResult, error) {
 		}
 		i = next
 	}
-	return splitResult{claudeArgs: s.claude, promptArgs: s.prompt, turnTimeoutExplicit: s.turnTimeoutExplicit}, nil
+	return splitResult{
+		claudeArgs:          s.claude,
+		promptArgs:          s.prompt,
+		turnTimeoutExplicit: s.turnTimeoutExplicit,
+		jsonSchemaExplicit:  s.jsonSchemaExplicit,
+	}, nil
 }
 
 func (s *splitter) splitLong(i int) (int, error) {
@@ -306,6 +316,9 @@ func (s *splitter) skipLongBool(name string, hasValue bool, i int) (int, error) 
 func (s *splitter) skipLongValue(name string, hasValue bool, i int) (int, error) {
 	if name == "turn-timeout" {
 		s.turnTimeoutExplicit = true
+	}
+	if name == "json-schema" {
+		s.jsonSchemaExplicit = true
 	}
 	if hasValue {
 		return i, nil

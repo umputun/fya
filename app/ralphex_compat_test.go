@@ -99,6 +99,8 @@ func TestStructuredOutputCompatibilityEnvelopeIsObject(t *testing.T) {
 		})
 
 	event := decodeJSONObject(t, out)
+	assert.Equal(t, "success", event["subtype"])
+	assert.Equal(t, false, event["is_error"])
 	result, ok := event["result"].(string)
 	require.True(t, ok)
 	assert.JSONEq(t, structuredCompatResult, result)
@@ -118,12 +120,16 @@ func TestStructuredOutputCompatibilityExtractionShape(t *testing.T) {
 		})
 
 	var envelope struct {
+		Subtype          string `json:"subtype"`
+		IsError          bool   `json:"is_error"`
 		StructuredOutput struct {
 			Summary  string   `json:"summary"`
 			Findings []string `json:"findings"`
 		} `json:"structured_output"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(out)), &envelope))
+	assert.Equal(t, "success", envelope.Subtype)
+	assert.False(t, envelope.IsError)
 	assert.Equal(t, "done", envelope.StructuredOutput.Summary)
 	assert.Equal(t, []string{"kept object envelope", "kept ralphex stream-json compatibility"}, envelope.StructuredOutput.Findings)
 }
@@ -170,7 +176,7 @@ func TestRalphexStreamJSONCompatibilityWithoutJSONSchema(t *testing.T) {
 	const signal = "<<<RALPHEX:ALL_TASKS_DONE>>>"
 	out := fyaCompatOutput(t, []string{"--print", "--output-format=stream-json", "review"},
 		func(req turnRunnerRequest, w *stream.Writer) error {
-			assert.Nil(t, req.Stream.ValidateStructuredOutput)
+			assert.Nil(t, req.ValidateStructuredOutput)
 			if err := w.Text("fixed the task\n"); err != nil {
 				return fmt.Errorf("write ralphex text: %w", err)
 			}
@@ -227,7 +233,11 @@ func fyaCompatRun(t *testing.T, args []string, write compatWriterFunc) compatRun
 		args: args, stdout: &stdout, stderr: &stderr,
 		factory: func(req turnRunnerRequest) turnExecutor {
 			return turnRunnerFunc(func(context.Context, turn.Config) error {
-				return write(req, stream.NewWriter(req.Stdout, req.Stream))
+				cfg := stream.Config{
+					Format:                   req.Options.OutputFormat,
+					ValidateStructuredOutput: req.ValidateStructuredOutput,
+				}
+				return write(req, stream.NewWriter(req.Stdout, cfg))
 			})
 		},
 	}))
