@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.5 - 2026-06-03
+
+### Bug Fixes
+
+- Mark fya turn timeouts as transient so wrappers can retry fya-owned turn-timeout failures without parsing generic context deadline errors.
+
 ## v0.2.4 - 2026-06-02
 
 ### Bug Fixes
