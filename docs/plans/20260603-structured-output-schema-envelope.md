@@ -180,14 +180,14 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 **Files:**
 - Modify: as needed from prior tasks
 
-- [ ] verify `fya --print --output-format=json --json-schema <schema>` emits `structured_output` on valid model JSON
-- [ ] verify invalid model JSON returns non-zero and does not emit fake `structured_output`
-- [ ] verify existing error results keep their original `terminal_reason` and are not replaced by schema validation errors
-- [ ] verify unknown flags and existing forwarded Claude flags still behave as before
-- [ ] run formatter: `make fmt`
-- [ ] run full test suite: `make test`
-- [ ] run linter: `make lint`
-- [ ] run build: `make build`
+- [x] verify `fya --print --output-format=json --json-schema <schema>` emits `structured_output` on valid model JSON
+- [x] verify invalid model JSON returns non-zero and does not emit fake `structured_output`
+- [x] verify existing error results keep their original `terminal_reason` and are not replaced by schema validation errors
+- [x] verify unknown flags and existing forwarded Claude flags still behave as before
+- [x] run formatter: `make fmt`
+- [x] run full test suite: `make test`
+- [x] run linter: `make lint`
+- [x] run build: `make build`
 
 ### Task 7: [Final] Archive plan
 

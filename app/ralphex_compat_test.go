@@ -85,6 +85,13 @@ func TestRalphexCommandShapeOptions(t *testing.T) {
 	assert.Equal(t, wantClaudeArgs, cfg.ClaudeArgs)
 }
 
+func TestRalphexCommandShapeRejectsUnknownFlag(t *testing.T) {
+	_, err := options.NewParser().Parse([]string{"--unknown-flag", "review"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown flag: --unknown-flag")
+}
+
 func TestStructuredOutputCompatibilityEnvelopeIsObject(t *testing.T) {
 	out := fyaCompatOutput(t, []string{"--print", "--output-format=json", "--json-schema", structuredCompatSchema, "review"},
 		func(_ turnRunnerRequest, w *stream.Writer) error {
@@ -119,6 +126,44 @@ func TestStructuredOutputCompatibilityExtractionShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(out)), &envelope))
 	assert.Equal(t, "done", envelope.StructuredOutput.Summary)
 	assert.Equal(t, []string{"kept object envelope", "kept ralphex stream-json compatibility"}, envelope.StructuredOutput.Findings)
+}
+
+func TestStructuredOutputCompatibilityInvalidModelJSONReturnsError(t *testing.T) {
+	res := fyaCompatRun(t, []string{"--print", "--output-format=json", "--json-schema", structuredCompatSchema, "review"},
+		func(_ turnRunnerRequest, w *stream.Writer) error {
+			return w.Final(stream.Result{Result: "not json", SessionID: "compat-session"})
+		})
+
+	require.Error(t, res.err)
+	assert.Empty(t, res.stderr)
+	event := decodeJSONObject(t, res.stdout)
+	assert.Equal(t, "result", event["type"])
+	assert.Equal(t, "error", event["subtype"])
+	assert.Equal(t, true, event["is_error"])
+	assert.Equal(t, "fya_structured_output_invalid", event["terminal_reason"])
+	assert.NotContains(t, event, "structured_output")
+}
+
+func TestStructuredOutputCompatibilityPreservesExistingErrorReason(t *testing.T) {
+	res := fyaCompatRun(t, []string{"--print", "--output-format=json", "--json-schema", structuredCompatSchema, "review"},
+		func(_ turnRunnerRequest, w *stream.Writer) error {
+			return w.Final(stream.Result{
+				Subtype:        "error",
+				IsError:        true,
+				Result:         "turn timed out",
+				SessionID:      "compat-session",
+				TerminalReason: "fya_turn_timeout",
+			})
+		})
+
+	require.NoError(t, res.err)
+	assert.Empty(t, res.stderr)
+	event := decodeJSONObject(t, res.stdout)
+	assert.Equal(t, "error", event["subtype"])
+	assert.Equal(t, true, event["is_error"])
+	assert.Equal(t, "turn timed out", event["result"])
+	assert.Equal(t, "fya_turn_timeout", event["terminal_reason"])
+	assert.NotContains(t, event, "structured_output")
 }
 
 func TestRalphexStreamJSONCompatibilityWithoutJSONSchema(t *testing.T) {
@@ -160,7 +205,22 @@ const structuredCompatResult = `{"summary":"done","findings":["kept object envel
 
 type compatWriterFunc func(turnRunnerRequest, *stream.Writer) error
 
+type compatRunResult struct {
+	stdout string
+	stderr string
+	err    error
+}
+
 func fyaCompatOutput(t *testing.T, args []string, write compatWriterFunc) string {
+	t.Helper()
+	res := fyaCompatRun(t, args, write)
+
+	require.NoError(t, res.err)
+	assert.Empty(t, res.stderr)
+	return res.stdout
+}
+
+func fyaCompatRun(t *testing.T, args []string, write compatWriterFunc) compatRunResult {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	err := execute(t.Context(), testRequest(testReq{
@@ -171,10 +231,7 @@ func fyaCompatOutput(t *testing.T, args []string, write compatWriterFunc) string
 			})
 		},
 	}))
-
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
-	return stdout.String()
+	return compatRunResult{stdout: stdout.String(), stderr: stderr.String(), err: err}
 }
 
 func decodeJSONObject(t *testing.T, data string) map[string]any {
