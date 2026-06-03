@@ -27,6 +27,7 @@ var (
 	consumedValue = map[string]struct{}{
 		"output-format":     {},
 		"input-format":      {},
+		"json-schema":       {},
 		"idle-timeout":      {},
 		"turn-timeout":      {},
 		"cwd":               {},
@@ -59,7 +60,6 @@ var (
 		"debug-file":                         {},
 		"effort":                             {},
 		"fallback-model":                     {},
-		"json-schema":                        {},
 		"max-budget-usd":                     {},
 		"model":                              {},
 		"name":                               {},
@@ -98,6 +98,7 @@ var (
 type Config struct {
 	OutputFormat       string
 	InputFormat        string
+	JSONSchema         string
 	ReplayUserMessages bool
 	Silent             bool
 	IdleTimeout        time.Duration
@@ -117,6 +118,7 @@ type rawOptions struct {
 	Print              bool          `short:"p" long:"print" description:"run one print-compatible turn (always on; accepted for drop-in compatibility)"`
 	OutputFormat       string        `long:"output-format" choice:"text" choice:"json" choice:"stream-json" default:"text" description:"output format"`
 	InputFormat        string        `long:"input-format" choice:"text" choice:"stream-json" default:"text" description:"input format"`
+	JSONSchema         string        `long:"json-schema" description:"JSON schema for structured output; requires --output-format=json and --input-format=text"`
 	ReplayUserMessages bool          `long:"replay-user-messages" description:"re-emit stream-json user messages on stdout"`
 	Silent             bool          `long:"silent" description:"accepted for compatibility; synthetic tool progress is disabled by default"`
 	IdleTimeout        time.Duration `long:"idle-timeout" default:"2s" description:"transcript idle duration before considering a turn complete"`
@@ -166,6 +168,7 @@ func (p *Parser) Parse(args []string) (Config, error) {
 	cfg := Config{
 		OutputFormat:       raw.OutputFormat,
 		InputFormat:        raw.InputFormat,
+		JSONSchema:         raw.JSONSchema,
 		ReplayUserMessages: raw.ReplayUserMessages,
 		Silent:             raw.Silent,
 		IdleTimeout:        raw.IdleTimeout,
@@ -218,6 +221,12 @@ func (c Config) validate() error {
 	}
 	if c.ReadinessTimeout < 0 {
 		return errors.New("readiness-timeout must be non-negative")
+	}
+	if c.JSONSchema != "" && c.OutputFormat != "json" {
+		return errors.New("json-schema requires --output-format=json")
+	}
+	if c.JSONSchema != "" && c.InputFormat == "stream-json" {
+		return errors.New("json-schema requires --input-format=text")
 	}
 	return nil
 }

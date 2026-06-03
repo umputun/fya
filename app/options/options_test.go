@@ -44,6 +44,39 @@ func TestParseConsumedFlags(t *testing.T) {
 	assert.Equal(t, []string{"hello"}, cfg.PromptArgs)
 }
 
+func TestParseConsumesJSONSchema(t *testing.T) {
+	schema := `{"type":"object"}`
+	tests := []struct {
+		name       string
+		args       []string
+		wantClaude []string
+	}{
+		{
+			name:       "separate",
+			args:       []string{"--output-format", "json", "--json-schema", schema, "--model", "opus", "prompt"},
+			wantClaude: []string{"--model", "opus"},
+		},
+		{
+			name:       "equals",
+			args:       []string{"--output-format=json", "--json-schema=" + schema, "--model=opus", "prompt"},
+			wantClaude: []string{"--model=opus"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := NewParser().Parse(tt.args)
+
+			require.NoError(t, err)
+			assert.Equal(t, schema, cfg.JSONSchema)
+			assert.Equal(t, "json", cfg.OutputFormat)
+			assert.Equal(t, "text", cfg.InputFormat)
+			assert.Equal(t, tt.wantClaude, cfg.ClaudeArgs)
+			assert.Equal(t, []string{"prompt"}, cfg.PromptArgs)
+		})
+	}
+}
+
 func TestParseDefaultsPrintText(t *testing.T) {
 	cfg, err := NewParser().Parse([]string{"-p", "hello"})
 
@@ -177,6 +210,31 @@ func TestParseRejectsInvalidFormats(t *testing.T) {
 	}{
 		{name: "output", args: []string{"--output-format", "xml"}, want: "Invalid value"},
 		{name: "input", args: []string{"--input-format=json"}, want: "Invalid value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewParser().Parse(tt.args)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestParseRejectsJSONSchemaUnsupportedFormats(t *testing.T) {
+	schema := `{"type":"object"}`
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "default output text", args: []string{"--json-schema", schema}, want: "json-schema requires --output-format=json"},
+		{name: "stream json output", args: []string{"--output-format=stream-json", "--json-schema", schema}, want: "json-schema requires --output-format=json"},
+		{
+			name: "stream json input",
+			args: []string{"--output-format=json", "--input-format=stream-json", "--json-schema", schema},
+			want: "json-schema requires --input-format=text",
+		},
 	}
 
 	for _, tt := range tests {
