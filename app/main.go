@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,15 +31,27 @@ type turnExecutor interface {
 	Run(context.Context, turn.Config) error
 }
 
-type turnRunnerFactory func(stdout, stderr io.Writer, cfg options.Config) turnExecutor
+type turnRunnerFactory func(turnRunnerRequest) turnExecutor
 
-func defaultTurnRunner(stdout, stderr io.Writer, cfg options.Config) turnExecutor {
-	output := stream.NewWriter(stdout, stream.Config{Format: cfg.OutputFormat})
+type turnRunnerRequest struct {
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Options options.Config
+	Stream  stream.Config
+}
+
+func defaultTurnRunner(req turnRunnerRequest) turnExecutor {
+	cfg := req.Options
+	streamCfg := req.Stream
+	if streamCfg.Format == "" {
+		streamCfg.Format = cfg.OutputFormat
+	}
+	output := stream.NewWriter(req.Stdout, streamCfg)
 	return turn.NewRunner(turn.Dependencies{
 		ProcessStarter: turn.NewPTYStarter(),
 		Readiness: ready.NewDetector(ready.Config{
 			Timeout:         cfg.ReadinessTimeout,
-			Warn:            stderr,
+			Warn:            req.Stderr,
 			NonFatalTimeout: true,
 		}),
 		Injector: typing.NewInjector(typing.Config{
@@ -46,7 +59,7 @@ func defaultTurnRunner(stdout, stderr io.Writer, cfg options.Config) turnExecuto
 			Jitter:      cfg.TypingJitter,
 			MaxWPMSize:  cfg.MaxWPMSize,
 			TurnTimeout: cfg.TurnTimeout,
-			Warn:        stderr,
+			Warn:        req.Stderr,
 		}),
 		Catalog: transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
 		TailerFactory: func(path string) turn.Tailer {
@@ -128,14 +141,26 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		return fmt.Errorf("read prompt: %w", err)
 	}
 
+	var validateStructuredOutput func(string) (json.RawMessage, error)
 	if cfg.JSONSchema != "" {
-		if _, err := schemaoutput.NewValidator(cfg.JSONSchema); err != nil {
+		var err error
+		validateStructuredOutput, err = schemaoutput.NewValidator(cfg.JSONSchema)
+		if err != nil {
 			return fmt.Errorf("prepare structured output: %w", err)
 		}
 		prompt += schemaoutput.Instruction(cfg.JSONSchema)
 	}
 
-	if err := req.Factory(req.Stdout, req.Stderr, cfg).Run(ctx, turn.Config{
+	runnerReq := turnRunnerRequest{
+		Stdout:  req.Stdout,
+		Stderr:  req.Stderr,
+		Options: cfg,
+		Stream: stream.Config{
+			Format:                   cfg.OutputFormat,
+			ValidateStructuredOutput: validateStructuredOutput,
+		},
+	}
+	if err := req.Factory(runnerReq).Run(ctx, turn.Config{
 		ClaudeArgs:   cfg.ClaudeArgs,
 		CWD:          cfg.CWD,
 		TurnTimeout:  cfg.TurnTimeout,

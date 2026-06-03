@@ -141,15 +141,15 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `app/stream/stream.go`
 - Modify: `app/stream/stream_test.go`
 
-- [ ] replace the current turn-runner factory parameters with an unexported request struct to avoid a long signature
-- [ ] pass the schema validation hook into `stream.Config`
-- [ ] make `Writer.Final` skip structured validation when `result.IsError` is already true
-- [ ] emit top-level `structured_output` in `--output-format=json` success results when validation succeeds
-- [ ] emit the specified JSON error result and return an error when final assistant text fails JSON/schema validation
-- [ ] keep behavior unchanged for text, stream-json, and json output without `--json-schema`
-- [ ] write success tests for `structured_output` envelope, preserved raw `result`, and unchanged behavior without `--json-schema`
-- [ ] write error/edge tests for validation failure envelope and existing error-result bypass
-- [ ] run tests: `make test`
+- [x] replace the current turn-runner factory parameters with an unexported request struct to avoid a long signature
+- [x] pass the schema validation hook into `stream.Config`
+- [x] make `Writer.Final` skip structured validation when `result.IsError` is already true
+- [x] emit top-level `structured_output` in `--output-format=json` success results when validation succeeds
+- [x] emit the specified JSON error result and return an error when final assistant text fails JSON/schema validation
+- [x] keep behavior unchanged for text, stream-json, and json output without `--json-schema`
+- [x] write success tests for `structured_output` envelope, preserved raw `result`, and unchanged behavior without `--json-schema`
+- [x] write error/edge tests for validation failure envelope and existing error-result bypass
+- [x] run tests: `make test`
 
 ### Task 4: Add structured-output compatibility regression coverage
 

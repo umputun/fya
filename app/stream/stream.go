@@ -19,8 +19,9 @@ const (
 // Config configures a Writer. SessionID, when set, is used as a fallback when a
 // Final result does not include its own session id.
 type Config struct {
-	Format    string
-	SessionID string
+	Format                   string
+	SessionID                string
+	ValidateStructuredOutput func(string) (json.RawMessage, error)
 }
 
 // Event is one Claude print-mode stream-json event with a nested message body.
@@ -129,7 +130,7 @@ func (w *Writer) Final(result Result) error {
 	case FormatText:
 		return w.writeText(result.Result)
 	case FormatJSON:
-		return w.writeJSON(w.resultObject(result))
+		return w.writeJSONResult(result)
 	case FormatStreamJSON:
 		return w.writeJSON(w.resultObject(result))
 	default:
@@ -189,6 +190,39 @@ func (w *Writer) writeText(text string) error {
 		return fmt.Errorf("write text result newline: %w", err)
 	}
 	return nil
+}
+
+func (w *Writer) writeJSONResult(result Result) error {
+	obj, err := w.jsonResultObject(result)
+	if writeErr := w.writeJSON(obj); writeErr != nil {
+		return writeErr
+	}
+	return err
+}
+
+func (w *Writer) jsonResultObject(result Result) (map[string]any, error) {
+	obj := w.resultObject(result)
+	if result.IsError || w.cfg.ValidateStructuredOutput == nil {
+		return obj, nil
+	}
+	raw, err := w.cfg.ValidateStructuredOutput(result.Result)
+	if err != nil {
+		return w.validationErrorObject(result, err), fmt.Errorf("validate structured output: %w", err)
+	}
+	obj["structured_output"] = raw
+	return obj, nil
+}
+
+func (w *Writer) validationErrorObject(result Result, err error) map[string]any {
+	return map[string]any{
+		"type":            "result",
+		"subtype":         "error",
+		"is_error":        true,
+		"result":          fmt.Sprintf("structured output validation failed: %v", err),
+		"session_id":      result.SessionID,
+		"num_turns":       result.NumTurns,
+		"terminal_reason": "fya_structured_output_invalid",
+	}
 }
 
 func (w *Writer) resultObject(result Result) map[string]any {

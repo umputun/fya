@@ -16,6 +16,7 @@ import (
 
 	"github.com/umputun/fya/app/options"
 	"github.com/umputun/fya/app/schemaoutput"
+	"github.com/umputun/fya/app/stream"
 	"github.com/umputun/fya/app/turn"
 )
 
@@ -39,7 +40,7 @@ func TestExecuteVersion(t *testing.T) {
 func TestDefaultTurnRunner(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	runner := defaultTurnRunner(&stdout, &stderr, options.Config{})
+	runner := defaultTurnRunner(turnRunnerRequest{Stdout: &stdout, Stderr: &stderr, Options: options.Config{}, Stream: stream.Config{}})
 
 	assert.NotNil(t, runner)
 }
@@ -117,6 +118,27 @@ func TestRunAppendsJSONSchemaInstruction(t *testing.T) {
 	assert.Equal(t, "hello"+schemaoutput.Instruction(schema), gotPrompt)
 }
 
+func TestRunPassesJSONSchemaValidatorToStreamConfig(t *testing.T) {
+	var got stream.Config
+	var stdout, stderr bytes.Buffer
+	schema := `{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"}}}`
+	cfg := optionsConfig("hello")
+	cfg.OutputFormat = "json"
+	cfg.JSONSchema = schema
+	factory := func(req turnRunnerRequest) turnExecutor {
+		got = req.Stream
+		return turnRunnerFunc(func(context.Context, turn.Config) error { return nil })
+	}
+
+	err := run(t.Context(), cfg, testRequest(testReq{stdout: &stdout, stderr: &stderr, factory: factory}))
+
+	require.NoError(t, err)
+	require.NotNil(t, got.ValidateStructuredOutput)
+	raw, err := got.ValidateStructuredOutput(`{"summary":"done"}`)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"summary":"done"}`, string(raw))
+}
+
 func TestRunKeepsPromptUnchangedWithoutJSONSchema(t *testing.T) {
 	var gotPrompt string
 	var stdout, stderr bytes.Buffer
@@ -127,6 +149,23 @@ func TestRunKeepsPromptUnchangedWithoutJSONSchema(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "hello", gotPrompt)
+}
+
+func TestRunLeavesStructuredValidatorUnsetWithoutJSONSchema(t *testing.T) {
+	var got stream.Config
+	var stdout, stderr bytes.Buffer
+	cfg := optionsConfig("hello")
+	cfg.OutputFormat = "json"
+	factory := func(req turnRunnerRequest) turnExecutor {
+		got = req.Stream
+		return turnRunnerFunc(func(context.Context, turn.Config) error { return nil })
+	}
+
+	err := run(t.Context(), cfg, testRequest(testReq{stdout: &stdout, stderr: &stderr, factory: factory}))
+
+	require.NoError(t, err)
+	assert.Equal(t, stream.FormatJSON, got.Format)
+	assert.Nil(t, got.ValidateStructuredOutput)
 }
 
 func TestRunRejectsInvalidJSONSchemaBeforeTurn(t *testing.T) {
@@ -309,13 +348,13 @@ func testRequest(req testReq) request {
 }
 
 func factoryReturning(err error) turnRunnerFactory {
-	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+	return func(turnRunnerRequest) turnExecutor {
 		return turnRunnerFunc(func(context.Context, turn.Config) error { return err })
 	}
 }
 
 func capturePromptFactory(prompt *string) turnRunnerFactory {
-	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+	return func(turnRunnerRequest) turnExecutor {
 		return turnRunnerFunc(func(_ context.Context, cfg turn.Config) error {
 			*prompt = cfg.Prompt
 			return nil
@@ -324,7 +363,7 @@ func capturePromptFactory(prompt *string) turnRunnerFactory {
 }
 
 func captureConfigFactory(got *turn.Config) turnRunnerFactory {
-	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+	return func(turnRunnerRequest) turnExecutor {
 		return turnRunnerFunc(func(_ context.Context, cfg turn.Config) error {
 			*got = cfg
 			return nil
@@ -337,7 +376,7 @@ func captureConfigFactory(got *turn.Config) turnRunnerFactory {
 // must short-circuit before reaching the turn runner.
 func neverFactory(t *testing.T) turnRunnerFactory {
 	t.Helper()
-	return func(io.Writer, io.Writer, options.Config) turnExecutor {
+	return func(turnRunnerRequest) turnExecutor {
 		t.Fatal("turn runner factory invoked unexpectedly")
 		return nil
 	}

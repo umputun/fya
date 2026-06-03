@@ -90,6 +90,78 @@ func TestJSONOutput(t *testing.T) {
 	assert.Equal(t, "result", event["type"])
 	assert.Equal(t, "hello", event["result"])
 	assert.Equal(t, "stop", event["terminal_reason"])
+	assert.NotContains(t, event, "structured_output")
+}
+
+func TestJSONOutputWithStructuredOutput(t *testing.T) {
+	var out bytes.Buffer
+	w := NewWriter(&out, Config{
+		Format: FormatJSON,
+		ValidateStructuredOutput: func(text string) (json.RawMessage, error) {
+			assert.JSONEq(t, `{"summary":"done"}`, text)
+			return json.RawMessage(text), nil
+		},
+	})
+
+	require.NoError(t, w.Final(Result{Result: `{"summary":"done"}`, TerminalReason: "stop"}))
+
+	event := decodeLine(t, strings.TrimSpace(out.String()))
+	assert.Equal(t, "result", event["type"])
+	result, ok := event["result"].(string)
+	require.True(t, ok)
+	assert.JSONEq(t, `{"summary":"done"}`, result)
+	structured, ok := event["structured_output"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "done", structured["summary"])
+	assert.Equal(t, "stop", event["terminal_reason"])
+}
+
+func TestJSONStructuredOutputValidationFailure(t *testing.T) {
+	var out bytes.Buffer
+	w := NewWriter(&out, Config{
+		Format: FormatJSON,
+		ValidateStructuredOutput: func(string) (json.RawMessage, error) {
+			return nil, errors.New("not schema-valid")
+		},
+	})
+
+	err := w.Final(Result{Result: "not json", SessionID: "s3"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "validate structured output")
+	event := decodeLine(t, strings.TrimSpace(out.String()))
+	assert.Equal(t, "result", event["type"])
+	assert.Equal(t, "error", event["subtype"])
+	assert.Equal(t, true, event["is_error"])
+	result, ok := event["result"].(string)
+	require.True(t, ok)
+	assert.Contains(t, result, "not schema-valid")
+	assert.Equal(t, "s3", event["session_id"])
+	assert.Equal(t, "fya_structured_output_invalid", event["terminal_reason"])
+	assert.NotContains(t, event, "structured_output")
+}
+
+func TestJSONStructuredOutputSkipsExistingErrorResult(t *testing.T) {
+	var out bytes.Buffer
+	called := false
+	w := NewWriter(&out, Config{
+		Format: FormatJSON,
+		ValidateStructuredOutput: func(string) (json.RawMessage, error) {
+			called = true
+			return nil, errors.New("should not run")
+		},
+	})
+
+	err := w.Final(Result{Subtype: "error", IsError: true, Result: "turn failed", TerminalReason: "fya_turn_timeout"})
+
+	require.NoError(t, err)
+	assert.False(t, called)
+	event := decodeLine(t, strings.TrimSpace(out.String()))
+	assert.Equal(t, "error", event["subtype"])
+	assert.Equal(t, true, event["is_error"])
+	assert.Equal(t, "turn failed", event["result"])
+	assert.Equal(t, "fya_turn_timeout", event["terminal_reason"])
+	assert.NotContains(t, event, "structured_output")
 }
 
 func TestFinalIsIdempotent(t *testing.T) {
