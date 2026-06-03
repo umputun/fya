@@ -155,14 +155,23 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 		Dir:     cfg.CWD,
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return r.finishCanceled(ctx, "start claude pty", "")
+		}
 		return fmt.Errorf("start claude pty: %w", err)
 	}
 	defer r.cleanupSession(session)
 
 	if _, readyErr := r.ready.Wait(ctx, session); readyErr != nil {
+		if ctx.Err() != nil {
+			return r.finishCanceled(ctx, "wait claude readiness", "")
+		}
 		return fmt.Errorf("wait claude readiness: %w", readyErr)
 	}
 	if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil {
+		if ctx.Err() != nil {
+			return r.finishCanceled(ctx, "type prompt", "")
+		}
 		return fmt.Errorf("type prompt: %w", typeErr)
 	}
 
@@ -367,6 +376,13 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 		return fmt.Errorf("write final output after session exit: %w", err)
 	}
 	return errors.New("claude exited before turn completion")
+}
+
+func (r *Runner) finishCanceled(ctx context.Context, op, sessionID string) error {
+	if err := r.output.Final(r.cancelResult(sessionID, ctx)); err != nil {
+		return fmt.Errorf("write final output: %w", err)
+	}
+	return fmt.Errorf("%s: %w", op, r.ctxError(ctx))
 }
 
 func (r *Runner) cancelResult(sessionID string, ctx context.Context) stream.Result {
