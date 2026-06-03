@@ -169,11 +169,11 @@ If a previous task shipped a violation (spotted later by user, reviewer, or your
 - Modify: `README.md`
 - Modify: `ARCHITECTURE.md`
 
-- [ ] document `--json-schema` support scope: JSON output only, text input only, no retry in v1
-- [ ] document top-level `structured_output` behavior and validation failure behavior
-- [ ] document that fya must be invoked by absolute path in consumers that also need a real `claude` child binary on PATH
-- [ ] document live downstream-integration smoke tests as optional/manual because they consume Claude quota
-- [ ] run docs-focused checks: `make test`
+- [x] document `--json-schema` support scope: JSON output only, text input only, no retry in v1
+- [x] document top-level `structured_output` behavior and validation failure behavior
+- [x] document that fya must be invoked by absolute path in consumers that also need a real `claude` child binary on PATH
+- [x] document live downstream-integration smoke tests as optional/manual because they consume Claude quota
+- [x] run docs-focused checks: `make test`
 
 ### Task 6: Verify acceptance criteria
 

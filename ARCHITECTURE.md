@@ -48,6 +48,7 @@ Stdout is reserved for caller-visible output. Diagnostics, warnings, stack dumps
 - `app` is the executable composition root. It owns CLI process wiring, signal handling, stdin/stdout/stderr ownership, and dependency construction.
 - `app/options` parses fya-compatible flags, splits consumed wrapper flags from forwarded Claude launch flags, and rejects unknown flags.
 - `app/input` resolves the prompt from stdin or positional args. Text input accepts stdin with or without a trailing newline. Stream-json input accepts exactly one user message.
+- `app/schemaoutput` compiles JSON Schema text, appends the structured-output prompt instruction, and validates a successful final assistant answer as one JSON value.
 - `app/ptyrun` starts a command inside a PTY, captures terminal output into a capped tail buffer, exposes process lifecycle methods, and performs graceful cleanup with hard-kill fallback.
 - `app/ready` detects when Claude's interactive editor is ready for typed input from PTY output.
 - `app/typing` types the prompt rune-by-rune with configurable WPM and jitter, sends multiline input without early submit, and sends the final Enter automatically.
@@ -64,6 +65,7 @@ Consumed by `fya`:
 - `-p`, `--print`
 - `--output-format`
 - `--input-format`
+- `--json-schema`
 - `--replay-user-messages`
 - `--idle-timeout`
 - `--turn-timeout`
@@ -86,6 +88,8 @@ Forwarded to interactive Claude:
 - `-v`, which belongs to Claude and must not trigger fya version output
 
 Unknown flags fail fast. Unsupported compatibility flags should not be accepted or documented unless fya actually implements their behavior.
+
+Operators must invoke fya by absolute path when a consumer also needs a real Claude child binary. fya starts the child process by running `claude` from `PATH`, so replacing `claude` with fya or placing a fya shim named `claude` ahead of the real binary will recurse or fail before the interactive PTY flow starts.
 
 ## Prompt Input
 
@@ -273,6 +277,22 @@ Example:
 {"type":"result","subtype":"success","is_error":false,"result":"hello","session_id":"...","num_turns":1,"terminal_reason":"end_turn"}
 ```
 
+Structured output is enabled only for `--output-format=json --json-schema=SCHEMA` with text input. `--input-format=stream-json` and `--output-format=stream-json` schema mode are rejected in v1, and fya does not perform corrective retries.
+
+When schema mode is enabled, fya compiles the schema before starting Claude, appends a schema-output instruction to the prompt, and validates only successful final results. A successful result keeps `result` as the raw assistant text and adds top-level `structured_output` as the validated JSON value:
+
+```json
+{"type":"result","subtype":"success","is_error":false,"result":"{\"summary\":\"done\"}","structured_output":{"summary":"done"},"session_id":"...","num_turns":1,"terminal_reason":"end_turn"}
+```
+
+If the successful final assistant text is empty, not exactly one JSON value, or does not validate against the schema, `app/stream.Writer` writes a valid JSON error result, returns an error so the process exits non-zero, and omits `structured_output`:
+
+```json
+{"type":"result","subtype":"error","is_error":true,"result":"structured output validation failed: ...","session_id":"...","num_turns":1,"terminal_reason":"fya_structured_output_invalid"}
+```
+
+Existing error results from startup, readiness, timeout, cancellation, transcript selection/tailing, or Claude exit bypass structured-output validation and keep their original `terminal_reason`.
+
 ## Signals And Cancellation
 
 `main` installs signal handling per invocation:
@@ -322,4 +342,7 @@ Important test areas:
 - typing WPM, jitter, multiline handling, and final Enter
 - transcript path encoding, prompt matching, complete-line tailing, and completion
 - Ralphex stream-json compatibility
+- structured-output JSON envelope compatibility and validation failure behavior
 - turn orchestration, timeout, transcript retry, Claude exit drain, and cleanup
+
+Live downstream-integration smoke tests are optional and manual because they call Claude and consume quota. They should configure the downstream consumer to invoke fya by absolute path while leaving the real `claude` child binary on `PATH`.
