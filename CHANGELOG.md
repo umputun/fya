@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 - 2026-06-04
+
+### Bug Fixes
+
+- Switch `--gate` from a 5m wall-clock turn cap to a 5m idle no-activity timeout measured from the last transcript write, so a long but actively-working turn is no longer killed and only a genuine silent hang trips it. `--turn-timeout` keeps its 30m default.
+
 ## v0.3.0 - 2026-06-03
 
 ### New Features
