@@ -23,6 +23,12 @@ import (
 // transient Claude continuation stall instead of a generic process failure.
 var ErrTurnTimeout = errors.New("FYA_TRANSIENT_TIMEOUT: claude turn did not complete before fya turn timeout")
 
+// ErrNoActivityTimeout marks fya's idle no-activity stall: the transcript
+// produced no new activity for the configured window while the turn was not
+// completable. It shares the FYA_TRANSIENT_TIMEOUT marker so orchestrators
+// classify it as a transient stall and retry.
+var ErrNoActivityTimeout = errors.New("FYA_TRANSIENT_TIMEOUT: claude produced no transcript activity before fya no-activity timeout")
+
 //go:generate moq -out mocks/session.go -pkg mocks -skip-ensure -fmt goimports . Session
 //go:generate moq -out mocks/process_starter.go -pkg mocks -skip-ensure -fmt goimports . ProcessStarter
 //go:generate moq -out mocks/readiness.go -pkg mocks -skip-ensure -fmt goimports . Readiness
@@ -83,14 +89,15 @@ type Output interface {
 // Config controls one Runner.Run invocation. All event output goes through
 // Dependencies.Output; stdout/stderr are owned by the caller of main.
 type Config struct {
-	ClaudeArgs   []string
-	CWD          string
-	TurnTimeout  time.Duration
-	IdleTimeout  time.Duration
-	StreamEvents bool
-	Prompt       string
-	StartedAt    time.Time
-	PollPeriod   time.Duration
+	ClaudeArgs        []string
+	CWD               string
+	TurnTimeout       time.Duration
+	IdleTimeout       time.Duration
+	NoActivityTimeout time.Duration
+	StreamEvents      bool
+	Prompt            string
+	StartedAt         time.Time
+	PollPeriod        time.Duration
 }
 
 // Runner orchestrates a single Claude PTY turn through the injected dependencies.
@@ -270,6 +277,13 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			}
 			return nil
 		}
+		if req.cfg.NoActivityTimeout > 0 && time.Since(lastTranscriptActivityAt) >= req.cfg.NoActivityTimeout {
+			cause := fmt.Errorf("%w after %s", ErrNoActivityTimeout, req.cfg.NoActivityTimeout)
+			if err := r.output.Final(r.noActivityResult(lastEvent.SessionID, cause)); err != nil {
+				return fmt.Errorf("write final output: %w", err)
+			}
+			return fmt.Errorf("turn canceled: %w", cause)
+		}
 		select {
 		case <-ctx.Done():
 			if err := r.output.Final(r.cancelResult(lastEvent.SessionID, ctx)); err != nil {
@@ -426,6 +440,16 @@ func (r *Runner) cancelResult(sessionID string, ctx context.Context) stream.Resu
 		result.Result = cause.Error()
 	}
 	return result
+}
+
+func (r *Runner) noActivityResult(sessionID string, cause error) stream.Result {
+	return stream.Result{
+		SessionID:      sessionID,
+		IsError:        true,
+		Subtype:        "error",
+		TerminalReason: "fya_no_activity_timeout",
+		Result:         cause.Error(),
+	}
 }
 
 func (r *Runner) ctxError(ctx context.Context) error {

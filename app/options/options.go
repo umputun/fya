@@ -103,6 +103,7 @@ type Config struct {
 	Silent             bool
 	IdleTimeout        time.Duration
 	TurnTimeout        time.Duration
+	NoActivityTimeout  time.Duration
 	CWD                string
 	TypingWPM          int
 	TypingJitter       float64
@@ -123,7 +124,7 @@ type rawOptions struct {
 	Silent             bool          `long:"silent" description:"accepted for compatibility; synthetic tool progress is disabled by default"`
 	IdleTimeout        time.Duration `long:"idle-timeout" default:"2s" description:"transcript idle duration before considering a turn complete"`
 	TurnTimeout        time.Duration `long:"turn-timeout" default:"30m" description:"maximum wall-clock duration for one turn"`
-	Gate               bool          `long:"gate" description:"use unattended gate defaults; sets turn-timeout to 5m unless explicitly supplied"`
+	Gate               bool          `long:"gate" description:"use unattended gate defaults; abort a turn after 5m without transcript activity"`
 	CWD                string        `long:"cwd" default:"." description:"working directory for the Claude session"`
 	TypingWPM          int           `long:"typing-wpm" default:"100" description:"prompt typing speed in words per minute"`
 	TypingJitter       float64       `long:"typing-jitter" default:"0.20" description:"per-character typing delay jitter ratio (0 disables jitter)"`
@@ -163,9 +164,9 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		return Config{}, errors.New("json-schema requires a non-empty value")
 	}
 
-	turnTimeout := raw.TurnTimeout
-	if raw.Gate && !split.turnTimeoutExplicit {
-		turnTimeout = 5 * time.Minute
+	var noActivityTimeout time.Duration
+	if raw.Gate {
+		noActivityTimeout = 5 * time.Minute
 	}
 
 	cfg := Config{
@@ -175,7 +176,8 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		ReplayUserMessages: raw.ReplayUserMessages,
 		Silent:             raw.Silent,
 		IdleTimeout:        raw.IdleTimeout,
-		TurnTimeout:        turnTimeout,
+		TurnTimeout:        raw.TurnTimeout,
+		NoActivityTimeout:  noActivityTimeout,
 		CWD:                raw.CWD,
 		TypingWPM:          raw.TypingWPM,
 		TypingJitter:       raw.TypingJitter,
@@ -235,18 +237,16 @@ func (c Config) validate() error {
 }
 
 type splitResult struct {
-	claudeArgs          []string
-	promptArgs          []string
-	turnTimeoutExplicit bool
-	jsonSchemaExplicit  bool
+	claudeArgs         []string
+	promptArgs         []string
+	jsonSchemaExplicit bool
 }
 
 type splitter struct {
-	args                []string
-	claude              []string
-	prompt              []string
-	turnTimeoutExplicit bool
-	jsonSchemaExplicit  bool
+	args               []string
+	claude             []string
+	prompt             []string
+	jsonSchemaExplicit bool
 }
 
 func newSplitter(args []string) *splitter {
@@ -279,10 +279,9 @@ func (s *splitter) split() (splitResult, error) {
 		i = next
 	}
 	return splitResult{
-		claudeArgs:          s.claude,
-		promptArgs:          s.prompt,
-		turnTimeoutExplicit: s.turnTimeoutExplicit,
-		jsonSchemaExplicit:  s.jsonSchemaExplicit,
+		claudeArgs:         s.claude,
+		promptArgs:         s.prompt,
+		jsonSchemaExplicit: s.jsonSchemaExplicit,
 	}, nil
 }
 
@@ -314,9 +313,6 @@ func (s *splitter) skipLongBool(name string, hasValue bool, i int) (int, error) 
 }
 
 func (s *splitter) skipLongValue(name string, hasValue bool, i int) (int, error) {
-	if name == "turn-timeout" {
-		s.turnTimeoutExplicit = true
-	}
 	if name == "json-schema" {
 		s.jsonSchemaExplicit = true
 	}

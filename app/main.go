@@ -162,12 +162,13 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		ValidateStructuredOutput: validateStructuredOutput,
 	}
 	if err := req.Factory(runnerReq).Run(ctx, turn.Config{
-		ClaudeArgs:   cfg.ClaudeArgs,
-		CWD:          cfg.CWD,
-		TurnTimeout:  cfg.TurnTimeout,
-		IdleTimeout:  cfg.IdleTimeout,
-		StreamEvents: cfg.OutputFormat == stream.FormatStreamJSON,
-		Prompt:       prompt,
+		ClaudeArgs:        cfg.ClaudeArgs,
+		CWD:               cfg.CWD,
+		TurnTimeout:       cfg.TurnTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		NoActivityTimeout: cfg.NoActivityTimeout,
+		StreamEvents:      cfg.OutputFormat == stream.FormatStreamJSON,
+		Prompt:            prompt,
 	}); err != nil {
 		return fmt.Errorf("run turn: %w", err)
 	}

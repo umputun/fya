@@ -61,8 +61,8 @@ Wrapper controls:
 - `--cwd=PATH` - working directory for the interactive Claude session, default `.`
 - `--idle-timeout=DURATION` - transcript idle duration before completion, default `2s`
 - `--turn-timeout=DURATION` - maximum wall-clock duration for one turn, default `30m`
-- `--gate` - unattended gate profile; sets the default turn timeout to `5m` unless `--turn-timeout` is supplied
-- fya turn-timeout failures include `FYA_TRANSIENT_TIMEOUT` and `terminal_reason: "fya_turn_timeout"` so orchestration tools can retry them as transient Claude continuation stalls
+- `--gate` - unattended gate profile; aborts a turn after `5m` without transcript activity, measured from the last transcript write rather than from turn start
+- fya turn-timeout and no-activity failures include `FYA_TRANSIENT_TIMEOUT` (with `terminal_reason: "fya_turn_timeout"` or `"fya_no_activity_timeout"`) so orchestration tools can retry them as transient Claude continuation stalls
 - `--typing-wpm=N` - prompt typing speed in words per minute, default `100`
 - `--typing-jitter=FLOAT` - per-character delay jitter ratio, default `0.20` (0 disables jitter)
 - `--max-wpm-size=N` - paste the prompt in one write instead of typing it when the prompt is longer than `N` words, default `100`. `0` always types rune-by-rune. Pasting avoids the multi-minute typing latency of large prompts; typing keeps shorter prompts arriving as individual keystrokes.

@@ -200,7 +200,7 @@ runeCount(prompt) * baseDelay + settleDelay
 
 If estimated typing time exceeds `--turn-timeout`, it fails before launching the prompt into Claude. If the estimate exceeds the warning threshold, currently 30 seconds, fya writes a warning to stderr.
 
-`--gate` is a wrapper-only profile for unattended gate or cron runs. It does not change completion semantics; it only changes the default turn timeout from `30m` to `5m` when `--turn-timeout` was not supplied. Explicit `--turn-timeout` always wins, and values after `--` are prompt text.
+`--gate` is a wrapper-only profile for unattended gate or cron runs. It does not change completion semantics; it enables a `5m` no-activity stall: the turn is aborted when the transcript produces no new activity for `5m` while it is not completable. The clock is measured from the last transcript write, not from turn start, so a long but continuously-active turn is never killed — only a genuine silent hang trips it. `--turn-timeout` (default `30m`) is unchanged by `--gate` and still bounds the whole invocation as the wall-clock ceiling.
 
 ## Transcript Discovery
 
@@ -303,7 +303,7 @@ Existing error results from startup, readiness, timeout, cancellation, transcrip
 
 Cancellation flows through `turn.Runner` into the PTY process. The PTY driver kills the Claude process group on context cancellation because timeout/cancel paths prioritize not leaking child processes. Normal completed turns use graceful `Close` instead.
 
-When fya's own `--turn-timeout` fires, the returned error and the error final result include the stable marker `FYA_TRANSIENT_TIMEOUT` with `terminal_reason: "fya_turn_timeout"`. Orchestrators such as Ralphex can classify this as a transient Claude continuation stall and retry it without matching generic `context deadline exceeded` text.
+When fya's own `--turn-timeout` fires, the returned error and the error final result include the stable marker `FYA_TRANSIENT_TIMEOUT` with `terminal_reason: "fya_turn_timeout"`. The `--gate` no-activity stall surfaces the same `FYA_TRANSIENT_TIMEOUT` marker with `terminal_reason: "fya_no_activity_timeout"`. Orchestrators such as Ralphex can classify either as a transient Claude continuation stall and retry it without matching generic `context deadline exceeded` text.
 
 ## Diagnostics
 
@@ -327,6 +327,7 @@ Useful checks:
 - `~/.claude/projects/<encoded-cwd>` shows selected transcript candidates
 - `--dbg` enables fya debug logging
 - `--turn-timeout` bounds the whole invocation
+- `--gate` aborts a turn after `5m` of no transcript activity (transient, retryable)
 - `--readiness-timeout` bounds the hidden-TUI readiness wait
 
 ## Testing
