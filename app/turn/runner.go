@@ -277,7 +277,15 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			}
 			return nil
 		}
-		if req.cfg.NoActivityTimeout > 0 && time.Since(lastTranscriptActivityAt) >= req.cfg.NoActivityTimeout {
+		if req.cfg.NoActivityTimeout > 0 && !completion.Eligible(tracker, lastEvent) &&
+			time.Since(lastTranscriptActivityAt) >= req.cfg.NoActivityTimeout {
+			// if Claude already exited, drain first: a final result may still be
+			// landing and must not be misreported as a transient no-activity stall
+			select {
+			case <-sessionDone:
+				return r.handleSessionExit(ctx, req.tailer, state)
+			default:
+			}
 			cause := fmt.Errorf("%w after %s", ErrNoActivityTimeout, req.cfg.NoActivityTimeout)
 			if err := r.output.Final(r.noActivityResult(lastEvent.SessionID, cause)); err != nil {
 				return fmt.Errorf("write final output: %w", err)
