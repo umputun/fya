@@ -1389,6 +1389,52 @@ func TestRunnerNoActivityTimeoutMeasuredFromStreamStart(t *testing.T) {
 	assert.NotEqual(t, "fya_no_activity_timeout", result.TerminalReason)
 }
 
+func TestRunnerNoActivityTimeoutFiresWhenIdleDisabled(t *testing.T) {
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	calls := 0
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				calls++
+				if calls == 1 {
+					// completion-eligible assistant text, then a hang
+					return []transcript.Event{{Text: "answer", SessionID: "s2"}}, true, nil
+				}
+				return nil, false, nil
+			}}
+		},
+		Output: output,
+	})
+
+	// idle completion disabled (--idle-timeout=0): an eligible-but-hung turn can
+	// never idle-complete, so the no-activity stall must still catch it
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: 500 * time.Millisecond, IdleTimeout: 0, NoActivityTimeout: 20 * time.Millisecond,
+		Prompt:     "hi",
+		PollPeriod: 5 * time.Millisecond,
+	})
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, turn.ErrNoActivityTimeout)
+	require.Len(t, output.FinalCalls(), 1)
+	result := output.FinalCalls()[0].Result
+	assert.True(t, result.IsError)
+	assert.Equal(t, "fya_no_activity_timeout", result.TerminalReason)
+}
+
 func newSessionMock() *mocks.SessionMock {
 	return newSessionMockWithDone(make(chan struct{}))
 }

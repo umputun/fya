@@ -93,12 +93,13 @@ func (c Completion) Done(tracker *Tracker, event Event, idleFor time.Duration) b
 }
 
 // Eligible reports whether the turn could complete on idle: a terminal record,
-// or completion-eligible assistant text with no pending tool work. Unlike Done
-// it ignores the idle window, so callers can tell "would complete once quiet"
-// apart from "has been quiet long enough".
+// or completion-eligible assistant text with no pending tool work while idle
+// completion is enabled. Unlike Done it ignores how long the transcript has
+// been idle, but it still respects IdleTimeout > 0 — with idle completion
+// disabled, assistant text alone can never complete, so it is not eligible.
 func (c Completion) Eligible(tracker *Tracker, event Event) bool {
 	if event.Result {
 		return true
 	}
-	return tracker != nil && tracker.pendingCount() == 0 && tracker.canIdleComplete()
+	return c.IdleTimeout > 0 && tracker != nil && tracker.pendingCount() == 0 && tracker.canIdleComplete()
 }

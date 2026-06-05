@@ -99,6 +99,25 @@ func TestTrackerAndCompletion(t *testing.T) {
 	assert.True(t, completion.Done(tracker, Event{Result: true}, 0), "explicit result event always completes")
 }
 
+func TestCompletionEligible(t *testing.T) {
+	completion := Completion{IdleTimeout: time.Second}
+
+	tracker := NewTracker()
+	tracker.Apply(Event{Text: "thinking", ToolUseIDs: []string{"t1"}, StopReason: "tool_use"})
+	assert.False(t, completion.Eligible(tracker, Event{}), "pending tool is not eligible")
+	assert.True(t, completion.Eligible(tracker, Event{Result: true}), "terminal result is always eligible")
+
+	tracker.Apply(Event{ToolResultIDs: []string{"t1"}})
+	tracker.Apply(Event{Text: "answer"})
+	assert.True(t, completion.Eligible(tracker, Event{}), "post-tool answer with idle enabled is eligible")
+
+	idleDisabled := Completion{IdleTimeout: 0}
+	assert.False(t, idleDisabled.Eligible(tracker, Event{}), "assistant text is not eligible when idle completion is disabled")
+	assert.True(t, idleDisabled.Eligible(tracker, Event{Result: true}), "terminal result is eligible even with idle disabled")
+
+	assert.False(t, completion.Eligible(nil, Event{}), "nil tracker without a result is not eligible")
+}
+
 func TestTrackerToolUseWithEndTurnStillWaitsForFollowup(t *testing.T) {
 	tracker := NewTracker()
 	completion := Completion{IdleTimeout: time.Second}
