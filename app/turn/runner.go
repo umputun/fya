@@ -277,10 +277,11 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			}
 			return nil
 		}
-		if req.cfg.NoActivityTimeout > 0 && !completion.Eligible(tracker, lastEvent) &&
+		// context cancellation (turn timeout / parent) and an already-exited claude
+		// both take precedence over the stall: a canceled turn must keep its real
+		// terminal reason, and a final result may still be draining
+		if req.cfg.NoActivityTimeout > 0 && ctx.Err() == nil && !completion.Eligible(tracker, lastEvent) &&
 			time.Since(lastTranscriptActivityAt) >= req.cfg.NoActivityTimeout {
-			// if Claude already exited, drain first: a final result may still be
-			// landing and must not be misreported as a transient no-activity stall
 			select {
 			case <-sessionDone:
 				return r.handleSessionExit(ctx, req.tailer, state)

@@ -1435,6 +1435,52 @@ func TestRunnerNoActivityTimeoutFiresWhenIdleDisabled(t *testing.T) {
 	assert.Equal(t, "fya_no_activity_timeout", result.TerminalReason)
 }
 
+func TestRunnerNoActivityTimeoutYieldsToContextCancel(t *testing.T) {
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+			return "x.jsonl", nil
+		}},
+		TailerFactory: func(string) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				calls++
+				if calls == 1 {
+					// the context is canceled as the no-activity window elapses; cancellation must win
+					cancel()
+					return []transcript.Event{{ToolUseIDs: []string{"t1"}, StopReason: "tool_use", SessionID: "s2"}}, true, nil
+				}
+				return nil, false, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(ctx, turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Minute, NoActivityTimeout: time.Nanosecond,
+		Prompt:     "hi",
+		PollPeriod: 5 * time.Millisecond,
+	})
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, turn.ErrNoActivityTimeout)
+	require.Len(t, output.FinalCalls(), 1)
+	assert.NotEqual(t, "fya_no_activity_timeout", output.FinalCalls()[0].Result.TerminalReason)
+}
+
 func newSessionMock() *mocks.SessionMock {
 	return newSessionMockWithDone(make(chan struct{}))
 }
