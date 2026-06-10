@@ -33,6 +33,7 @@ type Catalog struct {
 type candidate struct {
 	path    string
 	modTime time.Time
+	size    int64
 }
 
 // NewCatalog returns a Catalog rooted at the given Claude config dir. An empty
@@ -87,12 +88,28 @@ func (c *Catalog) candidates(cwd string) ([]candidate, error) {
 		candidates = append(candidates, candidate{
 			path:    filepath.Join(dir, entry.Name()),
 			modTime: info.ModTime(),
+			size:    info.Size(),
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].modTime.After(candidates[j].modTime)
 	})
 	return candidates, nil
+}
+
+// Sizes returns the current byte size of every candidate transcript in cwd. A
+// missing project directory yields an empty map. Callers snapshot sizes before
+// typing a prompt so a resumed session's pre-existing history can be skipped.
+func (c *Catalog) Sizes(cwd string) (map[string]int64, error) {
+	candidates, err := c.candidates(cwd)
+	if err != nil {
+		return nil, err
+	}
+	sizes := make(map[string]int64, len(candidates))
+	for _, candidate := range candidates {
+		sizes[candidate.path] = candidate.size
+	}
+	return sizes, nil
 }
 
 // Select returns the most recent transcript in cwd that was modified at or after

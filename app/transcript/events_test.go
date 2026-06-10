@@ -177,3 +177,23 @@ func TestTrackerLegacyCompletionWithoutStopReason(t *testing.T) {
 
 	assert.True(t, completion.Done(tracker, Event{}, 2*time.Second), "old records without stop_reason still idle-complete")
 }
+
+// fork-session copies prior-turn records into the new transcript with their
+// original timestamps; the parser must surface them so the runner can drop
+// events that predate the current turn.
+func TestParserExtractsTimestamp(t *testing.T) {
+	p := parser{}
+
+	event, err := p.parse([]byte(`{"type":"assistant","timestamp":"2026-06-10T16:14:07.123Z","message":{"content":[{"type":"text","text":"ok"}]}}`))
+	require.NoError(t, err)
+	want := time.Date(2026, 6, 10, 16, 14, 7, 123000000, time.UTC)
+	assert.True(t, event.Timestamp.Equal(want), "timestamp must parse as RFC3339, got %v", event.Timestamp)
+
+	event, err = p.parse([]byte(`{"type":"mode"}`))
+	require.NoError(t, err)
+	assert.True(t, event.Timestamp.IsZero(), "records without timestamps must yield zero time")
+
+	event, err = p.parse([]byte(`{"type":"assistant","timestamp":"not-a-time"}`))
+	require.NoError(t, err)
+	assert.True(t, event.Timestamp.IsZero(), "unparseable timestamps must degrade to zero, not error")
+}

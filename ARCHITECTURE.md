@@ -228,11 +228,17 @@ Transcript selection:
 - checks both raw prompt text and JSON-escaped prompt text
 - returns `transcript.ErrNoTranscript` when no matching file exists yet
 
+Before the prompt is typed, the runner also snapshots the byte size of every candidate transcript (`Catalog.Sizes`). The snapshot is taken as late as possible — after readiness, immediately before typing — so records Claude writes while loading a resumed session still count as history.
+
 `turn.Runner.selectTranscript` retries `ErrNoTranscript` until a transcript appears, Claude exits, or the turn context is canceled.
 
 ## Transcript Tailing
 
 `transcript.Tailer` opens the selected transcript file on each poll, seeks to the current offset, and reads newline-delimited records.
+
+Tailing starts at the selected file's pre-typing size snapshot. For a fresh session the file did not exist at snapshot time and the offset is zero. For a resumed session (`--resume`, `--continue`) the snapshot skips every prior-turn record — a stale terminal record in that history would otherwise complete the turn instantly with the previous answer. A snapshot that races a mid-record write can land mid-line, so the first complete line read at a nonzero resume offset is allowed to be an unparseable fragment and is skipped; later parse errors still abort. A failed snapshot degrades to offset zero with a stderr warning.
+
+A forked session (`--resume` with `--fork-session`) starts a fresh transcript that embeds copied prior-turn records, so the size snapshot for it is necessarily zero. The runner therefore also drops parsed events whose record timestamp predates turn start. Copied records keep their original timestamps; records without timestamps (metadata, fixtures) always flow. The two mechanisms compose: the offset cheaply avoids re-reading resumed history, and the timestamp filter removes copied history the offset cannot see.
 
 Offsets advance only past complete newline-terminated lines. A partial trailing line is not consumed, so a poll that catches Claude mid-write can re-read the completed line on the next poll.
 

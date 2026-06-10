@@ -45,12 +45,13 @@ func TestRunnerSuccess(t *testing.T) {
 			},
 		},
 		Catalog: &mocks.CatalogMock{
+			SizesFunc: noSizes,
 			SelectFunc: func(_ string, _ time.Time, prompt string) (string, error) {
 				assert.Equal(t, "hello", prompt)
 				return "session.jsonl", nil
 			},
 		},
-		TailerFactory: func(path string) turn.Tailer {
+		TailerFactory: func(path string, _ int64) turn.Tailer {
 			assert.Equal(t, "session.jsonl", path)
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, true, nil
@@ -80,7 +81,7 @@ func TestRunnerStartFailure(t *testing.T) {
 		}},
 		Readiness:     &mocks.ReadinessMock{},
 		Injector:      &mocks.InjectorMock{},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        &mocks.OutputMock{},
 	})
@@ -114,7 +115,7 @@ func TestRunnerSelectRetriesUntilCancel(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			calls++
 			if calls > 1 {
 				cancel()
@@ -140,7 +141,7 @@ func TestRunnerReadinessFailure(t *testing.T) {
 			return ready.Result{}, errors.New("not ready")
 		}},
 		Injector:      &mocks.InjectorMock{},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        &mocks.OutputMock{},
 	})
@@ -163,7 +164,7 @@ func TestRunnerInjectFailure(t *testing.T) {
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error {
 			return errors.New("typing failed")
 		}},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        &mocks.OutputMock{},
 	})
@@ -197,10 +198,10 @@ func TestRunnerInjectorWritesPromptToSession(t *testing.T) {
 			}
 			return nil
 		}},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{Result: true, SessionID: "s"}}, true, nil
 			}}
@@ -231,7 +232,7 @@ func TestRunnerInjectorWriteError(t *testing.T) {
 			}
 			return nil
 		}},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        &mocks.OutputMock{},
 	})
@@ -255,10 +256,10 @@ func TestRunnerTailerError(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return nil, false, errors.New("tail boom")
 			}}
@@ -288,10 +289,10 @@ func TestRunnerFinalError(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{Text: "x", Result: true, SessionID: "s"}}, true, nil
 			}}
@@ -321,10 +322,10 @@ func TestRunnerIdleCompletion(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -367,10 +368,10 @@ func TestRunnerTranscriptActivityDelaysIdleCompletion(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch {
@@ -419,10 +420,10 @@ func TestRunnerEmitsDeltaTextWithoutStreamMessage(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{Type: "assistant", Text: "streamed chunk", Result: true, SessionID: "s"}}, true, nil
 			}}
@@ -458,10 +459,10 @@ func TestRunnerEmitsStreamMessageEvents(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				return []transcript.Event{{
 					Type:      "assistant",
@@ -505,10 +506,10 @@ func TestRunnerWaitsForEndTurnAfterToolUse(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
@@ -559,10 +560,10 @@ func TestRunnerCompletesPostToolAnswerWithoutEndTurn(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
@@ -610,7 +611,7 @@ func TestRunnerSelectAbortsOnSessionExit(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			calls++
 			if calls == 1 {
 				close(done) // claude exits while we're still polling for transcript
@@ -649,10 +650,10 @@ func TestRunnerSessionExitWithDrainableResult(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
@@ -701,10 +702,10 @@ func TestRunnerSessionExitDrainRetriesPickUpResult(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
@@ -767,10 +768,10 @@ func runSessionExitDrainTest(t *testing.T, tc sessionExitDrainTest) sessionExitD
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				return tc.readNew(calls, done)
@@ -888,10 +889,10 @@ func TestRunnerSessionExitDrainHonorsContext(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch calls {
@@ -931,10 +932,10 @@ func TestRunnerSessionExitDrainPropagatesError(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -977,10 +978,10 @@ func TestRunnerSessionExitMidStream(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1024,7 +1025,7 @@ func TestRunnerValidateNilDeps(t *testing.T) {
 				ProcessStarter: &mocks.ProcessStarterMock{},
 				Readiness:      &mocks.ReadinessMock{},
 				Injector:       &mocks.InjectorMock{},
-				Catalog:        &mocks.CatalogMock{},
+				Catalog:        &mocks.CatalogMock{SizesFunc: noSizes},
 				TailerFactory:  noopTailerFactory,
 				Output:         &mocks.OutputMock{},
 			}
@@ -1047,7 +1048,7 @@ func TestRunnerStartTimeout(t *testing.T) {
 		}},
 		Readiness:     &mocks.ReadinessMock{},
 		Injector:      &mocks.InjectorMock{},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        output,
 	})
@@ -1072,7 +1073,7 @@ func TestRunnerReadinessTimeout(t *testing.T) {
 			return ready.Result{}, ctx.Err()
 		}},
 		Injector:      &mocks.InjectorMock{},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        output,
 	})
@@ -1101,7 +1102,7 @@ func TestRunnerInjectTimeout(t *testing.T) {
 			<-ctx.Done()
 			return fmt.Errorf("type canceled: %w", ctx.Err())
 		}},
-		Catalog:       &mocks.CatalogMock{},
+		Catalog:       &mocks.CatalogMock{SizesFunc: noSizes},
 		TailerFactory: noopTailerFactory,
 		Output:        output,
 	})
@@ -1126,10 +1127,10 @@ func TestRunnerTimeout(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "session.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) { return nil, false, nil }}
 		},
 		Output: output,
@@ -1167,10 +1168,10 @@ func TestRunnerNoActivityTimeout(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1218,10 +1219,10 @@ func TestRunnerNoActivityTimeoutHeldOffWhileActive(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				switch {
@@ -1268,10 +1269,10 @@ func TestRunnerNoActivityTimeoutDefersToSessionExitDrain(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1313,10 +1314,10 @@ func TestRunnerNoActivityTimeoutSkipsCompletableTurn(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1358,10 +1359,10 @@ func TestRunnerNoActivityTimeoutMeasuredFromStreamStart(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1403,10 +1404,10 @@ func TestRunnerNoActivityTimeoutFiresWhenIdleDisabled(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1451,10 +1452,10 @@ func TestRunnerNoActivityTimeoutYieldsToContextCancel(t *testing.T) {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "x.jsonl", nil
 		}},
-		TailerFactory: func(string) turn.Tailer {
+		TailerFactory: func(string, int64) turn.Tailer {
 			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
 				calls++
 				if calls == 1 {
@@ -1506,7 +1507,7 @@ func runnerWithCatalogError(err error) *turn.Runner {
 			return ready.Result{Ready: true}, nil
 		}},
 		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
-		Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
 			return "", err
 		}},
 		TailerFactory: noopTailerFactory,
@@ -1514,6 +1515,156 @@ func runnerWithCatalogError(err error) *turn.Runner {
 	})
 }
 
-func noopTailerFactory(string) turn.Tailer {
+func noopTailerFactory(string, int64) turn.Tailer {
 	return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) { return nil, false, nil }}
+}
+
+func noSizes(string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
+// resume support: the runner must snapshot transcript sizes before typing the
+// prompt and hand the selected file's pre-typing size to the tailer factory so
+// a resumed session's history is not replayed. A stale terminal record in that
+// history would otherwise complete the turn instantly with the previous answer.
+func TestRunnerResumeTailsFromPreTypingSize(t *testing.T) {
+	var order []string
+	gotOffset := int64(-1)
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error {
+			order = append(order, "type")
+			return nil
+		}},
+		Catalog: &mocks.CatalogMock{
+			SizesFunc: func(string) (map[string]int64, error) {
+				order = append(order, "sizes")
+				return map[string]int64{"resumed.jsonl": 1234, "other.jsonl": 9}, nil
+			},
+			SelectFunc: func(string, time.Time, string) (string, error) {
+				return "resumed.jsonl", nil
+			},
+		},
+		TailerFactory: func(path string, offset int64) turn.Tailer {
+			assert.Equal(t, "resumed.jsonl", path)
+			gotOffset = offset
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Text: "new answer", Result: true, SessionID: "s-res"}}, true, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second,
+		Prompt: "consolidate",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"sizes", "type"}, order, "sizes must be snapshotted before the prompt is typed")
+	assert.Equal(t, int64(1234), gotOffset, "selected file's pre-typing size must reach the tailer")
+	require.Len(t, output.FinalCalls(), 1)
+	assert.Equal(t, "new answer", output.FinalCalls()[0].Result.FinalText)
+}
+
+// a sizes snapshot failure must degrade to fresh-session behavior (offset 0)
+// with a warning, not fail the turn: the snapshot is only needed for resume.
+func TestRunnerSizesErrorFallsBackToZeroOffset(t *testing.T) {
+	gotOffset := int64(-1)
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{
+			SizesFunc: func(string) (map[string]int64, error) {
+				return nil, errors.New("snapshot boom")
+			},
+			SelectFunc: func(string, time.Time, string) (string, error) {
+				return "x.jsonl", nil
+			},
+		},
+		TailerFactory: func(_ string, offset int64) turn.Tailer {
+			gotOffset = offset
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Text: "answer", Result: true, SessionID: "s"}}, true, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi"})
+
+	require.NoError(t, err, "snapshot failure must not fail the turn")
+	assert.Equal(t, int64(0), gotOffset)
+	require.Len(t, output.FinalCalls(), 1)
+	assert.False(t, output.FinalCalls()[0].Result.IsError)
+}
+
+// fork-session writes copied history into a fresh transcript file where the
+// pre-typing size snapshot is zero; events older than turn start must be
+// dropped so copied records (including stale terminal records) can neither
+// reach output nor complete the turn with a previous answer. Events without
+// timestamps (fixtures, metadata) must still flow.
+func TestRunnerDropsEventsOlderThanTurnStart(t *testing.T) {
+	started := time.Now()
+	old := started.Add(-time.Hour)
+	var texts []string
+	output := &mocks.OutputMock{
+		TextFunc: func(text string) error {
+			texts = append(texts, text)
+			return nil
+		},
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return newSessionMock(), nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog: &mocks.CatalogMock{SizesFunc: noSizes, SelectFunc: func(string, time.Time, string) (string, error) {
+			return "forked.jsonl", nil
+		}},
+		TailerFactory: func(string, int64) turn.Tailer {
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{
+					{Text: "stale answer", SessionID: "s-old", Timestamp: old},
+					{Result: true, SessionID: "s-old", Timestamp: old},
+					{Text: "fresh answer", Result: true, SessionID: "s-new", Timestamp: started.Add(time.Second)},
+				}, true, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second,
+		Prompt: "hi", StartedAt: started,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"fresh answer"}, texts, "stale text must not reach output")
+	require.Len(t, output.FinalCalls(), 1)
+	result := output.FinalCalls()[0].Result
+	assert.Equal(t, "s-new", result.SessionID, "stale terminal record must not complete the turn")
+	assert.Equal(t, "fresh answer", result.FinalText)
 }

@@ -72,6 +72,19 @@ Wrapper controls:
 
 Recognized Claude launch flags are forwarded to interactive `claude`, including `--dangerously-skip-permissions`, `--verbose`, `--model`, `--effort`, permission/tool flags, MCP/config flags, and related interactive Claude flags. Unknown flags fail fast instead of being forwarded.
 
+### Resuming a session
+
+`--resume=SESSION_ID` and `--continue` are forwarded to interactive `claude` and work per invocation: each fya run still accepts exactly one prompt and emits one result, but the turn executes inside the resumed session with its prior context. Output contains only the new turn; pre-existing history is never replayed. The final result's `session_id` identifies the session for a later invocation:
+
+```bash
+sid=$(fya --print --output-format=json "start the task" | jq -r '.session_id')
+fya --print --resume="$sid" --output-format=json "continue with the next step"
+```
+
+`--fork-session` combined with `--resume=SESSION_ID` continues the conversation under a new session id. The forked transcript embeds a copy of the prior history; fya filters those records out by timestamp so output still contains only the new turn.
+
+Bare `--resume` without a session id opens Claude's interactive session picker, which cannot be driven through the hidden PTY; always pass an explicit session id.
+
 ## Structured JSON Output
 
 `--json-schema=SCHEMA` is for callers that expect native Claude's structured-output JSON envelope. In v1 it is intentionally narrow:
@@ -142,7 +155,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the PTY flow, transcript tailing, rea
 - v1 supports Unix/macOS PTYs only. Windows returns an unsupported PTY error.
 - Transcript parsing follows the current Claude Code JSONL shapes used by the implementation tests. It is not byte-for-byte parity with every Claude stream event.
 - `stream-json` emits Claude-style `assistant`/`user` message events from the transcript plus one final `result` containing the accumulated assistant answer. fya relays native message-shaped events and does not synthesize `tool:` text progress.
-- Multi-turn `--input-format=stream-json` history is outside the one-shot design. Exactly one user message is accepted.
+- Multi-turn `--input-format=stream-json` history is outside the one-shot design. Exactly one user message is accepted per invocation; continue a session across invocations with `--resume=SESSION_ID`.
 - `--json-schema` is v1-only structured-output compatibility for `--output-format=json` with text input; it has no stream-json schema mode and no automatic retry.
 - Live parity and downstream-integration smoke checks are manual because they call Claude and consume quota.
 
