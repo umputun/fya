@@ -24,7 +24,7 @@ import (
 var ErrNoTranscript = errors.New("no matching transcript found")
 
 // Catalog enumerates Claude Code transcript files for a given project working
-// dir. Select is the only cross-package entry point.
+// dir. Select and Sizes are the cross-package entry points.
 type Catalog struct {
 	root string
 }

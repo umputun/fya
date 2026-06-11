@@ -1576,22 +1576,21 @@ func TestRunnerResumeTailsFromPreTypingSize(t *testing.T) {
 	assert.Equal(t, "new answer", output.FinalCalls()[0].Result.FinalText)
 }
 
-// a sizes snapshot failure must degrade to fresh-session behavior (offset 0)
-// with a warning, not fail the turn: the snapshot is only needed for resume.
-func TestRunnerSizesErrorFallsBackToZeroOffset(t *testing.T) {
-	gotOffset := int64(-1)
-	output := &mocks.OutputMock{
-		TextFunc:  func(string) error { return nil },
-		FinalFunc: func(stream.Result) error { return nil },
-	}
+// a sizes snapshot failure must fail the turn before the prompt is typed: a
+// resumed session tailed from offset 0 would replay old terminal records and
+// return the previous answer, and the runner cannot tell resumed turns from
+// fresh ones, so the snapshot is load-bearing for every turn.
+func TestRunnerSizesErrorFailsBeforeTyping(t *testing.T) {
+	session := newSessionMock()
+	injector := &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }}
 	runner := turn.NewRunner(turn.Dependencies{
 		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
-			return newSessionMock(), nil
+			return session, nil
 		}},
 		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
 			return ready.Result{Ready: true}, nil
 		}},
-		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Injector: injector,
 		Catalog: &mocks.CatalogMock{
 			SizesFunc: func(string) (map[string]int64, error) {
 				return nil, errors.New("snapshot boom")
@@ -1600,21 +1599,16 @@ func TestRunnerSizesErrorFallsBackToZeroOffset(t *testing.T) {
 				return "x.jsonl", nil
 			},
 		},
-		TailerFactory: func(_ string, offset int64) turn.Tailer {
-			gotOffset = offset
-			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
-				return []transcript.Event{{Text: "answer", Result: true, SessionID: "s"}}, true, nil
-			}}
-		},
-		Output: output,
+		TailerFactory: noopTailerFactory,
+		Output:        &mocks.OutputMock{},
 	})
 
 	err := runner.Run(t.Context(), turn.Config{CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi"})
 
-	require.NoError(t, err, "snapshot failure must not fail the turn")
-	assert.Equal(t, int64(0), gotOffset)
-	require.Len(t, output.FinalCalls(), 1)
-	assert.False(t, output.FinalCalls()[0].Result.IsError)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "snapshot transcript sizes")
+	assert.Empty(t, injector.TypeCalls(), "prompt must not be typed after a failed snapshot")
+	assert.Len(t, session.CloseCalls(), 1, "session must be cleaned up")
 }
 
 // fork-session writes copied history into a fresh transcript file where the

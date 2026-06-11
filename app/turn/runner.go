@@ -184,11 +184,13 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 	// --continue) appends to an existing transcript whose history already holds
 	// prior-turn records, including stale terminal records that would complete
 	// the turn instantly with the previous answer. Tailing starts past the
-	// snapshot so only records written for this turn are observed. A snapshot
-	// failure degrades to fresh-session behavior (offset 0).
+	// snapshot so only records written for this turn are observed. The snapshot
+	// is load-bearing: falling back to offset 0 would silently replay history
+	// on resumed turns, and the runner cannot tell resumed turns from fresh
+	// ones, so a failed snapshot fails the turn before any prompt is typed.
 	sizes, sizesErr := r.catalog.Sizes(cfg.CWD)
 	if sizesErr != nil {
-		log.Printf("[WARN] transcript size snapshot failed, tailing from start: %v", sizesErr)
+		return fmt.Errorf("snapshot transcript sizes: %w", sizesErr)
 	}
 
 	if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil {
