@@ -156,17 +156,27 @@ func (c *Catalog) promptForms(prompt string) []string {
 	}
 	forms := []string{}
 	add := func(form string) {
-		if slices.Contains(forms, form) {
+		if form == "" || slices.Contains(forms, form) {
 			return
 		}
 		forms = append(forms, form)
 	}
-	add(prompt)
-	if body, ok := c.jsonStringBody(prompt); ok {
-		add(body)
+	addAll := func(s string) {
+		add(s)
+		if body, ok := c.jsonStringBody(s); ok {
+			add(body)
+		}
+		if body, ok := c.jsonStringBodyNoHTML(s); ok {
+			add(body)
+		}
 	}
-	if body, ok := c.jsonStringBodyNoHTML(prompt); ok {
-		add(body)
+	addAll(prompt)
+	// Claude trims leading/trailing whitespace from the typed prompt before
+	// storing it in the transcript (e.g. a caller-appended trailing "\n\n"
+	// vanishes), so the verbatim forms never match and Select would poll until
+	// timeout. Also try the trimmed prompt so the stored user message is found.
+	if trimmed := strings.TrimSpace(prompt); trimmed != prompt {
+		addAll(trimmed)
 	}
 	return forms
 }
