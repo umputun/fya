@@ -200,7 +200,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("type prompt: %w", typeErr)
 	}
 
-	path, err := r.selectTranscript(ctx, cfg, session.Done())
+	path, err := r.selectTranscript(ctx, cfg, session)
 	if err != nil {
 		if finalErr := r.output.Final(r.cancelResult("", ctx)); finalErr != nil {
 			return fmt.Errorf("write final output: %w", finalErr)
@@ -219,14 +219,35 @@ func (r *Runner) cleanupSession(session Session) {
 	}
 }
 
+// Recovery tuning for a lost prompt. Claude can race the injected prompt and
+// never register a submitted message, so no transcript is ever written and the
+// turn would otherwise hang to the turn-timeout. selectTranscript first
+// re-submits (a bare CR — safe: if the paste landed but Enter was lost it
+// submits, if the editor is empty it is a no-op), then re-types the whole
+// prompt (the prior bare submits having produced nothing proves the editor is
+// empty, so a re-type is clean and never duplicates), bounded by a tight
+// no-transcript deadline. Healthy turns write the user message within ~1s of
+// submit — well under reinjectGrace — so recovery never fires on them.
+const (
+	reinjectGrace       = 6 * time.Second
+	noTranscriptTimeout = 75 * time.Second
+	maxRecoveries       = 4
+	bareSubmitTries     = 2
+)
+
 // selectTranscript polls catalog.Select until a transcript modified after
 // StartedAt and containing the prompt appears, ctx is canceled, or Claude
 // exits. Claude can take a moment to flush a new transcript so the loop
 // tolerates ErrNoTranscript; watching sessionDone prevents a 30-minute wait if
-// Claude crashed between typing and the first transcript flush.
-func (r *Runner) selectTranscript(ctx context.Context, cfg Config, sessionDone <-chan struct{}) (string, error) {
+// Claude crashed between typing and the first transcript flush. If the prompt
+// was lost to a TUI race it re-submits / re-types to recover (see above).
+func (r *Runner) selectTranscript(ctx context.Context, cfg Config, session Session) (string, error) {
 	ticker := time.NewTicker(cfg.PollPeriod)
 	defer ticker.Stop()
+	sessionDone := session.Done()
+	waitStart := time.Now()
+	lastRecovery := time.Now()
+	recoveries := 0
 	for {
 		path, err := r.catalog.Select(cfg.CWD, cfg.StartedAt, cfg.Prompt)
 		if err == nil {
@@ -234,6 +255,21 @@ func (r *Runner) selectTranscript(ctx context.Context, cfg Config, sessionDone <
 		}
 		if !errors.Is(err, transcript.ErrNoTranscript) {
 			return "", fmt.Errorf("select transcript: %w", err)
+		}
+		if recoveries < maxRecoveries && time.Since(lastRecovery) >= reinjectGrace {
+			if recoveries < bareSubmitTries {
+				if _, werr := io.WriteString(session, "\r"); werr != nil && ctx.Err() != nil {
+					return "", fmt.Errorf("re-submit prompt: %w", r.ctxError(ctx))
+				}
+			} else if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil && ctx.Err() != nil {
+				return "", fmt.Errorf("re-inject prompt: %w", r.ctxError(ctx))
+			}
+			recoveries++
+			lastRecovery = time.Now()
+			log.Printf("[WARN] no transcript yet — prompt recovery attempt %d/%d", recoveries, maxRecoveries)
+		}
+		if time.Since(waitStart) >= noTranscriptTimeout {
+			return "", fmt.Errorf("%w (no transcript after %s — prompt never registered)", ErrNoActivityTimeout, noTranscriptTimeout)
 		}
 		select {
 		case <-ctx.Done():
