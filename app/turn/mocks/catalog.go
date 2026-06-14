@@ -17,6 +17,9 @@ import (
 //			SelectFunc: func(cwd string, since time.Time, prompt string) (string, error) {
 //				panic("mock out the Select method")
 //			},
+//			SizesFunc: func(cwd string) (map[string]int64, error) {
+//				panic("mock out the Sizes method")
+//			},
 //		}
 //
 //		// use mockedCatalog in code that requires turn.Catalog
@@ -26,6 +29,9 @@ import (
 type CatalogMock struct {
 	// SelectFunc mocks the Select method.
 	SelectFunc func(cwd string, since time.Time, prompt string) (string, error)
+
+	// SizesFunc mocks the Sizes method.
+	SizesFunc func(cwd string) (map[string]int64, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -38,8 +44,14 @@ type CatalogMock struct {
 			// Prompt is the prompt argument value.
 			Prompt string
 		}
+		// Sizes holds details about calls to the Sizes method.
+		Sizes []struct {
+			// Cwd is the cwd argument value.
+			Cwd string
+		}
 	}
 	lockSelect sync.RWMutex
+	lockSizes  sync.RWMutex
 }
 
 // Select calls SelectFunc.
@@ -79,5 +91,37 @@ func (mock *CatalogMock) SelectCalls() []struct {
 	mock.lockSelect.RLock()
 	calls = mock.calls.Select
 	mock.lockSelect.RUnlock()
+	return calls
+}
+
+// Sizes calls SizesFunc.
+func (mock *CatalogMock) Sizes(cwd string) (map[string]int64, error) {
+	if mock.SizesFunc == nil {
+		panic("CatalogMock.SizesFunc: method is nil but Catalog.Sizes was just called")
+	}
+	callInfo := struct {
+		Cwd string
+	}{
+		Cwd: cwd,
+	}
+	mock.lockSizes.Lock()
+	mock.calls.Sizes = append(mock.calls.Sizes, callInfo)
+	mock.lockSizes.Unlock()
+	return mock.SizesFunc(cwd)
+}
+
+// SizesCalls gets all the calls that were made to Sizes.
+// Check the length with:
+//
+//	len(mockedCatalog.SizesCalls())
+func (mock *CatalogMock) SizesCalls() []struct {
+	Cwd string
+} {
+	var calls []struct {
+		Cwd string
+	}
+	mock.lockSizes.RLock()
+	calls = mock.calls.Sizes
+	mock.lockSizes.RUnlock()
 	return calls
 }

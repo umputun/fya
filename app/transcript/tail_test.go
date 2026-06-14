@@ -70,6 +70,61 @@ func TestTailerPartialLineSafe(t *testing.T) {
 	assert.Equal(t, "world", events[0].Text)
 }
 
+// resume case: the tailer must start at the supplied offset so pre-existing
+// history (earlier turns of a resumed session) never reaches the consumer. A
+// stale result record in that history would otherwise complete the turn with
+// the previous answer.
+func TestTailerAtOffsetSkipsHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	history := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}]}}` + "\n"
+	history += `{"type":"system","subtype":"turn_duration"}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(history), 0o600))
+	tailer := NewTailerAt(path, int64(len(history)))
+
+	appendTranscript(t, path, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"new answer"}]}}`+"\n")
+	events, activity, err := tailer.ReadNew()
+
+	require.NoError(t, err)
+	assert.True(t, activity)
+	require.Len(t, events, 1, "history before the offset must not be replayed")
+	assert.Equal(t, "new answer", events[0].Text)
+	assert.False(t, events[0].Result, "stale terminal records must not leak from history")
+}
+
+// a resume offset can land mid-record when the size snapshot races a write; the
+// first complete line at the offset is then a fragment and must be skipped, not
+// surfaced as a parse error that aborts the turn.
+func TestTailerAtOffsetSkipsTornFirstLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	full := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"old"}]}}` + "\n"
+	half := full[:20]
+	require.NoError(t, os.WriteFile(path, []byte(half), 0o600))
+	tailer := NewTailerAt(path, int64(len(half)))
+
+	appendTranscript(t, path, full[20:]) // writer completes the torn record
+	appendTranscript(t, path, `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"new"}]}}`+"\n")
+	events, activity, err := tailer.ReadNew()
+
+	require.NoError(t, err, "fragment at the resume offset must be skipped, not a parse error")
+	assert.True(t, activity)
+	require.Len(t, events, 1)
+	assert.Equal(t, "new", events[0].Text)
+}
+
+// parse errors past the first line at a resume offset must still abort: torn
+// tolerance is a one-shot allowance for the snapshot race, not blanket lenience.
+func TestTailerAtOffsetStillFailsOnLaterCorruption(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	first := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(first), 0o600))
+	tailer := NewTailerAt(path, 0)
+
+	appendTranscript(t, path, "not json at all\n")
+	_, _, err := tailer.ReadNew()
+
+	require.Error(t, err, "corruption beyond the first line at the offset must surface")
+}
+
 func appendTranscript(t *testing.T, path, value string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)

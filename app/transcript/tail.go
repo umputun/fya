@@ -19,11 +19,22 @@ type Tailer struct {
 	size     int64
 	seenSize bool
 	parser   *parser
+	// tolerateTorn is a one-shot allowance for a resume offset that landed
+	// mid-record because the size snapshot raced a write: the first complete
+	// line read at such an offset may be a fragment and is skipped instead of
+	// surfacing a parse error.
+	tolerateTorn bool
 }
 
 // NewTailer returns a Tailer pointed at path.
 func NewTailer(path string) *Tailer {
-	return &Tailer{path: path, parser: &parser{}}
+	return NewTailerAt(path, 0)
+}
+
+// NewTailerAt returns a Tailer that starts reading at offset. Used when
+// resuming an existing session so prior-turn records are not replayed.
+func NewTailerAt(path string, offset int64) *Tailer {
+	return &Tailer{path: path, offset: offset, tolerateTorn: offset > 0, parser: &parser{}}
 }
 
 // ReadNew opens the transcript file, reads from the current offset to EOF, and
@@ -51,8 +62,13 @@ func (t *Tailer) ReadNew() ([]Event, bool, error) {
 		complete := len(line) > 0 && line[len(line)-1] == '\n'
 		if complete {
 			t.offset += int64(len(line))
+			firstAtResumeOffset := t.tolerateTorn
+			t.tolerateTorn = false
 			event, parseErr := t.parser.parse(bytes.TrimRight(line, "\r\n"))
 			if parseErr != nil {
+				if firstAtResumeOffset {
+					continue // fragment left by the snapshot racing a write
+				}
 				return nil, activity, parseErr
 			}
 			events = append(events, event)

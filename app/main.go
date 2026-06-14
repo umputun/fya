@@ -55,8 +55,8 @@ func defaultTurnRunner(req turnRunnerRequest) turnExecutor {
 		}),
 		Injector: typing.NewInjector(typingConfig(cfg, req.Stderr)),
 		Catalog:  transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
-		TailerFactory: func(path string) turn.Tailer {
-			return transcript.NewTailer(path)
+		TailerFactory: func(path string, offset int64) turn.Tailer {
+			return transcript.NewTailerAt(path, offset)
 		},
 		Output: output,
 	})

@@ -59,6 +59,12 @@ func (r *Reader) Read() (string, error) {
 
 func (r *Reader) readText() (string, error) {
 	prompt := strings.Join(r.req.Args, " ")
+	// Claude convention: a bare "-" positional means "read the prompt from
+	// stdin" (callers like Claude Code's `-p -`). Treat it as no positional so
+	// the stdin path below runs instead of using "-" as the literal prompt.
+	if strings.TrimSpace(prompt) == "-" {
+		prompt = ""
+	}
 	if strings.TrimSpace(prompt) != "" {
 		// Positional prompts are finite and must not wait on an attached but open stdin pipe.
 		return newlineNormalizer.Replace(prompt), nil
