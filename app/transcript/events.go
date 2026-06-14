@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Event is one parsed Claude Code transcript JSONL record. Text is non-empty only
@@ -19,6 +20,7 @@ type Event struct {
 	ToolUseIDs    []string
 	ToolResultIDs []string
 	Result        bool
+	Timestamp     time.Time
 }
 
 // parser converts raw transcript JSONL lines into Event values. It is
@@ -41,7 +43,23 @@ func (p *parser) parse(line []byte) (Event, error) {
 	event.ToolResultIDs = p.toolIDs(raw, "tool_result")
 	event.Message = p.streamMessage(event, raw)
 	event.Result = event.Type == "result" || (event.Type == "system" && event.Subtype == "turn_duration")
+	event.Timestamp = p.timestamp(raw)
 	return event, nil
+}
+
+// timestamp parses the record's RFC3339 timestamp. Records without one (or
+// with an unparseable value) yield the zero time and are never filtered by
+// turn start, so metadata records and timestamp-free fixtures keep flowing.
+func (p *parser) timestamp(raw map[string]any) time.Time {
+	value := p.stringField(raw, "timestamp")
+	if value == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
 }
 
 // extractText returns assistant content suitable for streaming. Only records whose

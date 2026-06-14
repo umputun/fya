@@ -158,3 +158,33 @@ func TestCatalogSelectFreshButMissingPromptReturnsErrNoTranscript(t *testing.T) 
 
 	assert.ErrorIs(t, err, ErrNoTranscript)
 }
+
+// Sizes snapshots current transcript byte sizes so the runner can tail a
+// resumed session from the end of its pre-existing history.
+func TestCatalogSizes(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	aPath := filepath.Join(dir, "a.jsonl")
+	bPath := filepath.Join(dir, "b.jsonl")
+	require.NoError(t, os.WriteFile(aPath, []byte("0123456789"), 0o600))
+	require.NoError(t, os.WriteFile(bPath, []byte("xyz"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignored"), 0o600))
+
+	sizes, err := cat.Sizes(cwd)
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int64{aPath: 10, bPath: 3}, sizes)
+}
+
+func TestCatalogSizesMissingDir(t *testing.T) {
+	cat := NewCatalog(t.TempDir())
+
+	sizes, err := cat.Sizes(t.TempDir())
+
+	require.NoError(t, err, "missing project dir means no transcripts yet, not an error")
+	assert.Empty(t, sizes)
+}

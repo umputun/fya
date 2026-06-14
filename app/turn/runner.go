@@ -64,9 +64,12 @@ type Injector interface {
 	Type(context.Context, io.Writer, string) error
 }
 
-// Catalog locates the transcript JSONL file Claude is writing for the current cwd.
+// Catalog locates the transcript JSONL file Claude is writing for the current
+// cwd and snapshots transcript sizes so a resumed session is tailed past its
+// pre-existing history.
 type Catalog interface {
 	Select(cwd string, since time.Time, prompt string) (string, error)
+	Sizes(cwd string) (map[string]int64, error)
 }
 
 // Tailer reads transcript records across successive polls. ReadNew returns
@@ -76,8 +79,9 @@ type Tailer interface {
 	ReadNew() ([]transcript.Event, bool, error)
 }
 
-// TailerFactory constructs a Tailer for a given transcript path.
-type TailerFactory func(path string) Tailer
+// TailerFactory constructs a Tailer for a given transcript path, starting at
+// offset so a resumed session's prior-turn records are not replayed.
+type TailerFactory func(path string, offset int64) Tailer
 
 // Output writes Claude print-mode events and the final result.
 type Output interface {
@@ -176,6 +180,19 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 		}
 		return fmt.Errorf("wait claude readiness: %w", readyErr)
 	}
+	// snapshot transcript sizes before typing: a resumed session (--resume /
+	// --continue) appends to an existing transcript whose history already holds
+	// prior-turn records, including stale terminal records that would complete
+	// the turn instantly with the previous answer. Tailing starts past the
+	// snapshot so only records written for this turn are observed. The snapshot
+	// is load-bearing: falling back to offset 0 would silently replay history
+	// on resumed turns, and the runner cannot tell resumed turns from fresh
+	// ones, so a failed snapshot fails the turn before any prompt is typed.
+	sizes, sizesErr := r.catalog.Sizes(cfg.CWD)
+	if sizesErr != nil {
+		return fmt.Errorf("snapshot transcript sizes: %w", sizesErr)
+	}
+
 	if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil {
 		if ctx.Err() != nil {
 			return r.finishCanceled(ctx, "type prompt", "")
@@ -190,7 +207,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 		}
 		return err
 	}
-	return r.streamTranscript(ctx, streamRequest{cfg: cfg, session: session, tailer: r.tailers(path)})
+	return r.streamTranscript(ctx, streamRequest{cfg: cfg, session: session, tailer: r.tailers(path, sizes[path])})
 }
 
 func (r *Runner) cleanupSession(session Session) {
@@ -263,6 +280,7 @@ func (r *Runner) streamTranscript(ctx context.Context, req streamRequest) error 
 			streamEvents: req.cfg.StreamEvents,
 			finalText:    &finalText,
 			hasFinalText: &hasFinalText,
+			startedAt:    req.cfg.StartedAt,
 		}
 		done, err := r.applyEvents(events, state)
 		if err != nil {
@@ -314,6 +332,7 @@ type applyState struct {
 	streamEvents bool
 	finalText    *strings.Builder
 	hasFinalText *bool
+	startedAt    time.Time
 }
 
 func (s applyState) trackFinalText(event transcript.Event) {
@@ -348,6 +367,13 @@ func (s applyState) finalResult(sessionID string) stream.Result {
 // only ever care about per-event terminal signals (e.g. a result event).
 func (r *Runner) applyEvents(events []transcript.Event, s applyState) (bool, error) {
 	for _, event := range events {
+		// a forked session (--resume --fork-session) starts a fresh transcript
+		// that embeds copied prior-turn records with their original timestamps;
+		// the size snapshot cannot exclude them, so drop anything that predates
+		// this turn. Zero timestamps (metadata records) always flow.
+		if !event.Timestamp.IsZero() && event.Timestamp.Before(s.startedAt) {
+			continue
+		}
 		*s.lastEvent = event
 		s.tracker.Apply(event)
 		s.trackFinalText(event)

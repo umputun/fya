@@ -24,7 +24,7 @@ import (
 var ErrNoTranscript = errors.New("no matching transcript found")
 
 // Catalog enumerates Claude Code transcript files for a given project working
-// dir. Select is the only cross-package entry point.
+// dir. Select and Sizes are the cross-package entry points.
 type Catalog struct {
 	root string
 }
@@ -33,6 +33,7 @@ type Catalog struct {
 type candidate struct {
 	path    string
 	modTime time.Time
+	size    int64
 }
 
 // NewCatalog returns a Catalog rooted at the given Claude config dir. An empty
@@ -87,12 +88,28 @@ func (c *Catalog) candidates(cwd string) ([]candidate, error) {
 		candidates = append(candidates, candidate{
 			path:    filepath.Join(dir, entry.Name()),
 			modTime: info.ModTime(),
+			size:    info.Size(),
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].modTime.After(candidates[j].modTime)
 	})
 	return candidates, nil
+}
+
+// Sizes returns the current byte size of every candidate transcript in cwd. A
+// missing project directory yields an empty map. Callers snapshot sizes before
+// typing a prompt so a resumed session's pre-existing history can be skipped.
+func (c *Catalog) Sizes(cwd string) (map[string]int64, error) {
+	candidates, err := c.candidates(cwd)
+	if err != nil {
+		return nil, err
+	}
+	sizes := make(map[string]int64, len(candidates))
+	for _, candidate := range candidates {
+		sizes[candidate.path] = candidate.size
+	}
+	return sizes, nil
 }
 
 // Select returns the most recent transcript in cwd that was modified at or after
@@ -139,17 +156,27 @@ func (c *Catalog) promptForms(prompt string) []string {
 	}
 	forms := []string{}
 	add := func(form string) {
-		if slices.Contains(forms, form) {
+		if form == "" || slices.Contains(forms, form) {
 			return
 		}
 		forms = append(forms, form)
 	}
-	add(prompt)
-	if body, ok := c.jsonStringBody(prompt); ok {
-		add(body)
+	addAll := func(s string) {
+		add(s)
+		if body, ok := c.jsonStringBody(s); ok {
+			add(body)
+		}
+		if body, ok := c.jsonStringBodyNoHTML(s); ok {
+			add(body)
+		}
 	}
-	if body, ok := c.jsonStringBodyNoHTML(prompt); ok {
-		add(body)
+	addAll(prompt)
+	// Claude trims leading/trailing whitespace from the typed prompt before
+	// storing it in the transcript (e.g. a caller-appended trailing "\n\n"
+	// vanishes), so the verbatim forms never match and Select would poll until
+	// timeout. Also try the trimmed prompt so the stored user message is found.
+	if trimmed := strings.TrimSpace(prompt); trimmed != prompt {
+		addAll(trimmed)
 	}
 	return forms
 }
