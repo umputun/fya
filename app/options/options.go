@@ -132,7 +132,7 @@ type rawOptions struct {
 	TypingJitter       float64       `long:"typing-jitter" default:"0.20" description:"per-character typing delay jitter ratio (0 disables jitter)"`
 	MaxWPMSize         int           `long:"max-wpm-size" default:"100" description:"paste prompt at once instead of typing when it is longer than N words (0 always types)"`
 	ReadinessTimeout   time.Duration `long:"readiness-timeout" default:"30s" description:"maximum wait for Claude input readiness"`
-	TypeSettle         time.Duration `long:"type-settle" default:"250ms" description:"pause after Claude readiness before typing the prompt"`
+	TypeSettle         time.Duration `long:"type-settle" default:"250ms" description:"pause after Claude readiness before typing the prompt (randomized up to +20%)"`
 	Debug              bool          `long:"dbg" env:"DEBUG" description:"enable fya debug logging (named --dbg to avoid collision with claude --debug)"`
 	Version            bool          `short:"V" long:"version" description:"show version info"`
 }

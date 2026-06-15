@@ -539,7 +539,7 @@ const settleJitter = 0.2
 
 // settleDelay returns d extended by up to settleJitter of itself, keeping the
 // pause varied between invocations while never dropping below the configured
-// minimum margin. The jitter factor is clamped to [0, 1) so a misbehaving Rand
+// minimum margin. The jitter factor is clamped to [0, 1] so a misbehaving Rand
 // cannot produce a delay below the floor or an unbounded one.
 func (r *Runner) settleDelay(d time.Duration) time.Duration {
 	factor := r.rand()
