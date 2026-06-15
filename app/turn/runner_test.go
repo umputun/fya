@@ -1486,16 +1486,28 @@ func TestRunnerTypeSettle(t *testing.T) {
 		order  []string
 		slept  time.Duration
 		sleeps int
+		typed  bool
+		finals []stream.Result
 	}
-	newRunner := func(rec *recorder, randVal float64) *turn.Runner {
+	newRunner := func(rec *recorder, randVal float64, blocked bool, sleeper func(context.Context, time.Duration) error) *turn.Runner {
+		if sleeper == nil {
+			sleeper = func(_ context.Context, d time.Duration) error {
+				rec.slept = d
+				rec.sleeps++
+				rec.order = append(rec.order, "sleep")
+				return nil
+			}
+		}
 		return turn.NewRunner(turn.Dependencies{
 			ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
 				return newSessionMock(), nil
 			}},
-			Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
-				return ready.Result{Ready: true}, nil
-			}},
+			Readiness: &mocks.ReadinessMock{
+				WaitFunc:    func(context.Context, ready.Source) (ready.Result, error) { return ready.Result{Ready: true}, nil },
+				BlockedFunc: func(string) bool { return blocked },
+			},
 			Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error {
+				rec.typed = true
 				rec.order = append(rec.order, "type")
 				return nil
 			}},
@@ -1507,14 +1519,12 @@ func TestRunnerTypeSettle(t *testing.T) {
 					return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, true, nil
 				}}
 			},
-			Output: &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }},
-			Sleeper: func(_ context.Context, d time.Duration) error {
-				rec.slept = d
-				rec.sleeps++
-				rec.order = append(rec.order, "sleep")
+			Output: &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(r stream.Result) error {
+				rec.finals = append(rec.finals, r)
 				return nil
-			},
-			Rand: func() float64 { return randVal },
+			}},
+			Sleeper: sleeper,
+			Rand:    func() float64 { return randVal },
 		})
 	}
 	cfg := func(settle time.Duration) turn.Config {
@@ -1523,7 +1533,7 @@ func TestRunnerTypeSettle(t *testing.T) {
 
 	t.Run("jittered upward and applied before typing", func(t *testing.T) {
 		var rec recorder
-		require.NoError(t, newRunner(&rec, 0.5).Run(t.Context(), cfg(200*time.Millisecond)))
+		require.NoError(t, newRunner(&rec, 0.5, false, nil).Run(t.Context(), cfg(200*time.Millisecond)))
 		// 200ms + 200ms*0.2*0.5 = 220ms
 		assert.Equal(t, 220*time.Millisecond, rec.slept)
 		assert.Equal(t, []string{"sleep", "type"}, rec.order)
@@ -1531,22 +1541,105 @@ func TestRunnerTypeSettle(t *testing.T) {
 
 	t.Run("configured value is the floor with zero jitter", func(t *testing.T) {
 		var rec recorder
-		require.NoError(t, newRunner(&rec, 0).Run(t.Context(), cfg(200*time.Millisecond)))
+		require.NoError(t, newRunner(&rec, 0, false, nil).Run(t.Context(), cfg(200*time.Millisecond)))
 		assert.Equal(t, 200*time.Millisecond, rec.slept)
 	})
 
 	t.Run("never exceeds configured value plus jitter ceiling", func(t *testing.T) {
 		var rec recorder
-		require.NoError(t, newRunner(&rec, 0.999).Run(t.Context(), cfg(200*time.Millisecond)))
+		require.NoError(t, newRunner(&rec, 0.999, false, nil).Run(t.Context(), cfg(200*time.Millisecond)))
 		assert.Greater(t, rec.slept, 200*time.Millisecond)
 		assert.LessOrEqual(t, rec.slept, 240*time.Millisecond)
 	})
 
+	t.Run("out-of-range rand is clamped to the jitter ceiling", func(t *testing.T) {
+		var rec recorder
+		require.NoError(t, newRunner(&rec, 5.0, false, nil).Run(t.Context(), cfg(200*time.Millisecond)))
+		assert.Equal(t, 240*time.Millisecond, rec.slept, "factor > 1 clamps to +20%, never unbounded")
+	})
+
 	t.Run("disabled when zero", func(t *testing.T) {
 		var rec recorder
-		require.NoError(t, newRunner(&rec, 0.5).Run(t.Context(), cfg(0)))
+		require.NoError(t, newRunner(&rec, 0.5, false, nil).Run(t.Context(), cfg(0)))
 		assert.Zero(t, rec.sleeps, "settle sleeper must not run when TypeSettle is zero")
 		assert.Equal(t, []string{"type"}, rec.order)
+	})
+
+	t.Run("aborts when a blocking dialog appears during settle", func(t *testing.T) {
+		var rec recorder
+		err := newRunner(&rec, 0.5, true, nil).Run(t.Context(), cfg(200*time.Millisecond))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "blocking dialog appeared after settle")
+		assert.False(t, rec.typed, "prompt must not be typed into a blocking dialog")
+		assert.Equal(t, []string{"sleep"}, rec.order)
+		require.Len(t, rec.finals, 1)
+		assert.True(t, rec.finals[0].IsError)
+	})
+
+	t.Run("context canceled during settle aborts before typing", func(t *testing.T) {
+		var rec recorder
+		ctx, cancel := context.WithCancel(t.Context())
+		sleeper := func(c context.Context, _ time.Duration) error {
+			cancel()
+			return c.Err()
+		}
+		err := newRunner(&rec, 0.5, false, sleeper).Run(ctx, cfg(200*time.Millisecond))
+		require.Error(t, err)
+		assert.False(t, rec.typed, "prompt must not be typed after cancellation during settle")
+		require.Len(t, rec.finals, 1)
+		assert.True(t, rec.finals[0].IsError)
+	})
+
+	t.Run("non-cancel settle error is wrapped", func(t *testing.T) {
+		var rec recorder
+		sleeper := func(context.Context, time.Duration) error { return errors.New("boom") }
+		err := newRunner(&rec, 0.5, false, sleeper).Run(t.Context(), cfg(200*time.Millisecond))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "settle before type")
+		assert.False(t, rec.typed)
+	})
+}
+
+// exercises the production default Sleeper (realSleep) and Rand (randFloat64)
+// wired by NewRunner when Dependencies.Sleeper/Rand are nil — the injected-fake
+// settle tests never touch them.
+func TestRunnerTypeSettleRealDefaults(t *testing.T) {
+	build := func() *turn.Runner {
+		return turn.NewRunner(turn.Dependencies{
+			ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+				return newSessionMock(), nil
+			}},
+			Readiness: &mocks.ReadinessMock{
+				WaitFunc:    func(context.Context, ready.Source) (ready.Result, error) { return ready.Result{Ready: true}, nil },
+				BlockedFunc: func(string) bool { return false },
+			},
+			Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+			Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+				return "session.jsonl", nil
+			}},
+			TailerFactory: func(string) turn.Tailer {
+				return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+					return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, true, nil
+				}}
+			},
+			Output: &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }},
+		})
+	}
+
+	t.Run("real timer fires and turn completes", func(t *testing.T) {
+		err := build().Run(t.Context(), turn.Config{
+			CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi", TypeSettle: time.Millisecond,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("real sleeper honors a canceled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		err := build().Run(ctx, turn.Config{
+			CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi", TypeSettle: time.Hour,
+		})
+		require.Error(t, err)
 	})
 }
 

@@ -16,6 +16,9 @@ import (
 //
 //		// make and configure a mocked turn.Readiness
 //		mockedReadiness := &ReadinessMock{
+//			BlockedFunc: func(output string) bool {
+//				panic("mock out the Blocked method")
+//			},
 //			WaitFunc: func(contextMoqParam context.Context, source ready.Source) (ready.Result, error) {
 //				panic("mock out the Wait method")
 //			},
@@ -26,11 +29,19 @@ import (
 //
 //	}
 type ReadinessMock struct {
+	// BlockedFunc mocks the Blocked method.
+	BlockedFunc func(output string) bool
+
 	// WaitFunc mocks the Wait method.
 	WaitFunc func(contextMoqParam context.Context, source ready.Source) (ready.Result, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Blocked holds details about calls to the Blocked method.
+		Blocked []struct {
+			// Output is the output argument value.
+			Output string
+		}
 		// Wait holds details about calls to the Wait method.
 		Wait []struct {
 			// ContextMoqParam is the contextMoqParam argument value.
@@ -39,7 +50,40 @@ type ReadinessMock struct {
 			Source ready.Source
 		}
 	}
-	lockWait sync.RWMutex
+	lockBlocked sync.RWMutex
+	lockWait    sync.RWMutex
+}
+
+// Blocked calls BlockedFunc.
+func (mock *ReadinessMock) Blocked(output string) bool {
+	if mock.BlockedFunc == nil {
+		panic("ReadinessMock.BlockedFunc: method is nil but Readiness.Blocked was just called")
+	}
+	callInfo := struct {
+		Output string
+	}{
+		Output: output,
+	}
+	mock.lockBlocked.Lock()
+	mock.calls.Blocked = append(mock.calls.Blocked, callInfo)
+	mock.lockBlocked.Unlock()
+	return mock.BlockedFunc(output)
+}
+
+// BlockedCalls gets all the calls that were made to Blocked.
+// Check the length with:
+//
+//	len(mockedReadiness.BlockedCalls())
+func (mock *ReadinessMock) BlockedCalls() []struct {
+	Output string
+} {
+	var calls []struct {
+		Output string
+	}
+	mock.lockBlocked.RLock()
+	calls = mock.calls.Blocked
+	mock.lockBlocked.RUnlock()
+	return calls
 }
 
 // Wait calls WaitFunc.

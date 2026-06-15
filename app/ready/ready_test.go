@@ -241,28 +241,6 @@ func TestDetectorInputReadyMarker(t *testing.T) {
 	assert.Equal(t, "input-ready", got.Method)
 }
 
-// with the input-ready marker configured, the quiet-period fallback must NOT
-// promote a stable-but-unread editor to ready — that is the race the marker gate
-// closes. Without the marker present the detector should time out instead.
-func TestDetectorInputReadyMarkerGatesQuietFallback(t *testing.T) {
-	src, state := newMockSource()
-	state.setOutput("Claude loading") // stable, no glyph, no marker
-	var warn bytes.Buffer
-
-	got, err := NewDetector(Config{
-		Timeout:          15 * time.Millisecond,
-		QuietPeriod:      time.Millisecond,
-		PollInterval:     time.Millisecond,
-		Warn:             &warn,
-		NonFatalTimeout:  true,
-		InputReadyMarker: DefaultInputReadyMarker,
-	}).Wait(t.Context(), src)
-
-	require.NoError(t, err)
-	assert.False(t, got.Ready)
-	assert.Equal(t, "timeout", got.Method, "quiet must not fire while the input-ready marker is absent")
-}
-
 // the real Claude trust dialog positions every word with cursor-move escapes and
 // also emits the input-ready marker. The blocking veto must still recognize the
 // dialog (via normalized matching) and win over the marker, so fya never types
@@ -296,13 +274,74 @@ func TestDetectorNormalizeForMatch(t *testing.T) {
 		{"whitespace", "a b\tc\nd", "abcd"},
 		{"csi cursor move", "Quick\x1b[8Gsafety", "Quicksafety"},
 		{"sgr color", "\x1b[38;2;1;2;3mhi\x1b[39m", "hi"},
-		{"osc", "\x1b]11;?\x07x", "x"},
+		{"osc bel-terminated", "\x1b]11;?\x07x", "x"},
+		{"osc st-terminated", "\x1b]11;rgb\x1b\\x", "x"},
+		{"input-ready marker stripped clean", "\x1b[?2004hHello", "Hello"},
+		{"lone esc retained", "a\x1bb", "a\x1bb"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, d.normalizeForMatch(tt.in))
 		})
 	}
+}
+
+// the input-ready marker gates the weaker fallbacks: identical stable,
+// glyph-free output is held back when a marker is configured but absent, yet
+// promoted to "quiet" when no marker is configured. Varying only the marker
+// isolates the gate as the cause.
+func TestDetectorMarkerGatesFallbacks(t *testing.T) {
+	wait := func(marker string) (Result, error) {
+		src, state := newMockSource()
+		state.setOutput("Claude loading")
+		return NewDetector(Config{
+			Timeout:          15 * time.Millisecond,
+			QuietPeriod:      time.Millisecond,
+			PollInterval:     time.Millisecond,
+			Warn:             &bytes.Buffer{},
+			NonFatalTimeout:  true,
+			InputReadyMarker: marker,
+		}).Wait(t.Context(), src)
+	}
+
+	t.Run("quiet gated when marker configured", func(t *testing.T) {
+		got, err := wait(DefaultInputReadyMarker)
+		require.NoError(t, err)
+		assert.Equal(t, "timeout", got.Method)
+	})
+	t.Run("quiet fires when marker disabled", func(t *testing.T) {
+		got, err := wait("")
+		require.NoError(t, err)
+		assert.Equal(t, "quiet", got.Method)
+	})
+}
+
+// with a marker configured, an editor glyph must NOT promote readiness before
+// the marker appears — otherwise the rendered-UI race the marker closes leaks
+// back in through the glyph path.
+func TestDetectorGlyphGatedByMarker(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("Claude\n> ") // glyph present, marker absent
+	got, err := NewDetector(Config{
+		Timeout:          15 * time.Millisecond,
+		QuietPeriod:      time.Second,
+		PollInterval:     time.Millisecond,
+		Warn:             &bytes.Buffer{},
+		NonFatalTimeout:  true,
+		InputReadyMarker: DefaultInputReadyMarker,
+	}).Wait(t.Context(), src)
+
+	require.NoError(t, err)
+	assert.Equal(t, "timeout", got.Method, "glyph must not fire before the marker while a marker is configured")
+}
+
+func TestDetectorBlocked(t *testing.T) {
+	d := NewDetector(Config{InputReadyMarker: DefaultInputReadyMarker})
+	// column-positioned accept option, as Claude renders it
+	assert.True(t, d.Blocked("\x1b[4G\x1b[7GYes,\x1b[12GI\x1b[14Gtrust\x1b[20Gthis\x1b[25Gfolder"),
+		"current trust-dialog accept option must be detected even with cursor positioning")
+	assert.True(t, d.Blocked("Do you trust the files in this folder?"), "legacy trust phrase still matches")
+	assert.False(t, d.Blocked("\x1b[?2004h\x1b[2G❯ ready for input"), "a normal ready editor is not blocking")
 }
 
 type sourceState struct {

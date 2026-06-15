@@ -4,8 +4,8 @@
 
 ### Bug Fixes
 
-- Gate prompt readiness on Claude's input-ready marker (`ESC[?2004h`, bracketed-paste enable) instead of relying on editor glyphs or the quiet-period heuristic. The glyphs had drifted out of date with current Claude, leaving readiness dependent on the quiet heuristic, which can promote a painted-but-unread editor to ready on slow terminal transports such as a Docker Desktop VM — the prompt is then dropped, no transcript is produced, and the turn hangs until timeout. The marker is terminal protocol, proves the reader is attached, and disables the quiet fallback while configured.
-- Detect blocking dialogs (the trust prompt) with whitespace- and escape-insensitive matching. Current Claude positions dialog words with cursor moves rather than literal spaces, so the previous raw substring match could never catch the multi-word phrase. Also refresh the trust-dialog phrases and add `❯` to the editor glyphs.
+- Gate prompt readiness on Claude's input-ready marker (`ESC[?2004h`, bracketed-paste enable) instead of relying on editor glyphs or the quiet-period heuristic. The glyphs had drifted out of date with current Claude, leaving readiness dependent on the quiet heuristic, which can promote a painted-but-unread editor to ready on slow terminal transports such as a Docker Desktop VM — the prompt is then dropped, no transcript is produced, and the turn hangs until timeout. The marker is terminal protocol, proves the reader is attached, and disables the glyph and quiet fallbacks while configured.
+- Detect blocking dialogs (the trust prompt) with whitespace- and escape-insensitive matching. Current Claude positions dialog words with cursor moves rather than literal spaces, so the previous raw substring match could never catch the multi-word phrase; also refresh the trust-dialog phrases. After the `--type-settle` pause fya re-checks for a blocking dialog before typing, catching a trust prompt that finished rendering during the window.
 
 ### New Features
 

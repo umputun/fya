@@ -55,9 +55,12 @@ type ProcessStarter interface {
 	Start(context.Context, ptyrun.Config) (Session, error)
 }
 
-// Readiness blocks until the Source is ready to receive a typed prompt.
+// Readiness blocks until the Source is ready to receive a typed prompt. Blocked
+// re-checks a captured output snapshot for a blocking dialog, used after the
+// settle pause to catch a dialog that finished rendering since readiness fired.
 type Readiness interface {
 	Wait(context.Context, ready.Source) (ready.Result, error)
+	Blocked(output string) bool
 }
 
 // Injector types prompt rune-by-rune into the supplied writer.
@@ -204,6 +207,12 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 				return r.finishCanceled(ctx, "settle before type")
 			}
 			return fmt.Errorf("settle before type: %w", settleErr)
+		}
+		// a column-positioned dialog (e.g. the trust prompt) can finish rendering
+		// during the settle window, after readiness fired on the input-ready
+		// marker. Re-check the fresh output so the prompt is never typed into it.
+		if r.ready.Blocked(session.Output()) {
+			return r.finishBlocked()
 		}
 	}
 	if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil {
@@ -465,6 +474,17 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 	return errors.New("claude exited before turn completion")
 }
 
+// finishBlocked aborts the turn when a blocking dialog appears during the settle
+// window: it emits an error final result and returns an error instead of typing
+// the prompt into the dialog.
+func (r *Runner) finishBlocked() error {
+	msg := "blocking dialog appeared after settle; aborting before typing prompt"
+	if err := r.output.Final(stream.Result{IsError: true, Subtype: "error", TerminalReason: "error", Result: msg}); err != nil {
+		return fmt.Errorf("write final output: %w", err)
+	}
+	return errors.New(msg)
+}
+
 func (r *Runner) finishCanceled(ctx context.Context, op string) error {
 	if err := r.output.Final(r.cancelResult("", ctx)); err != nil {
 		return fmt.Errorf("write final output: %w", err)
@@ -519,9 +539,17 @@ const settleJitter = 0.2
 
 // settleDelay returns d extended by up to settleJitter of itself, keeping the
 // pause varied between invocations while never dropping below the configured
-// minimum margin.
+// minimum margin. The jitter factor is clamped to [0, 1) so a misbehaving Rand
+// cannot produce a delay below the floor or an unbounded one.
 func (r *Runner) settleDelay(d time.Duration) time.Duration {
-	return d + time.Duration(float64(d)*settleJitter*r.rand())
+	factor := r.rand()
+	if factor < 0 {
+		factor = 0
+	}
+	if factor >= 1 {
+		factor = 1
+	}
+	return d + time.Duration(float64(d)*settleJitter*factor)
 }
 
 func (*Runner) randFloat64() float64 {

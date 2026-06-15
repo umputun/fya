@@ -63,16 +63,18 @@ type Config struct {
 }
 
 // Result describes the outcome of a Wait call: whether the source became ready,
-// which detection method fired (glyph / quiet / timeout / process-exit), and the
-// final captured Output snapshot.
+// which detection method fired (input-ready / glyph / quiet / timeout /
+// process-exit), and the final captured Output snapshot.
 type Result struct {
 	Ready  bool
 	Method string
 	Output string
 }
 
-// Detector polls a Source until it appears ready for input, either by matching
-// one of the configured input-prompt glyphs or by the output going quiet.
+// Detector polls a Source until it appears ready for input. The primary signal
+// is the configured input-ready marker (Claude's bracketed-paste enable); the
+// input-prompt glyphs and the quiet period are fallbacks used only when no
+// marker is configured.
 type Detector struct {
 	cfg Config
 }
@@ -140,13 +142,13 @@ func (d *Detector) inspect(src Source, lastOutput string, lastChange time.Time) 
 		return Result{}, false
 	}
 	// the input-ready marker (bracketed-paste enable) is the most reliable signal
-	// that Claude's reader is attached, so it both fires readiness and disables
-	// the quiet fallback below — which can otherwise promote a painted-but-unread
-	// editor to ready and drop the typed/pasted prompt.
+	// that Claude's reader is attached, so it both fires readiness and, while
+	// configured, disables the weaker glyph and quiet fallbacks below — which can
+	// otherwise promote a painted-but-unread editor to ready and drop the prompt.
 	if d.hasInputReady(current) {
 		return Result{Ready: true, Method: "input-ready", Output: current}, true
 	}
-	if d.hasGlyph(current) {
+	if d.cfg.InputReadyMarker == "" && d.hasGlyph(current) {
 		return Result{Ready: true, Method: "glyph", Output: current}, true
 	}
 	if d.cfg.InputReadyMarker == "" && current != "" && current == lastOutput && time.Since(lastChange) >= d.cfg.QuietPeriod {
@@ -197,6 +199,16 @@ func (d *Detector) hasGlyph(output string) bool {
 	return false
 }
 
+// Blocked reports whether output currently shows a known blocking dialog (such
+// as the trust prompt). Callers use it to re-verify, after a post-readiness
+// pause, that no dialog has appeared in PTY output arriving since readiness was
+// detected — readiness fires on the input-ready marker, which Claude can emit
+// before a column-positioned dialog finishes rendering, so typing without this
+// re-check could send the prompt into the dialog.
+func (d *Detector) Blocked(output string) bool {
+	return d.hasBlockingPrompt(output)
+}
+
 // hasBlockingPrompt reports whether any blocking-dialog pattern is visible.
 // Both the output and the patterns are normalized (escape sequences and all
 // whitespace removed) before matching: Claude renders dialog text by moving the
@@ -245,7 +257,6 @@ func (c Config) withDefaults() Config {
 			"\r\n> ",
 			"│ > ",
 			"│> ",
-			"❯",
 			"? for shortcuts",
 		}
 	} else {

@@ -157,15 +157,15 @@ The hidden PTY means fya must infer when it is safe to type.
 
 Readiness detection checks, in order:
 
-1. The input-ready marker: Claude emits `ESC[?2004h` (bracketed-paste enable, DECSET 2004) when it switches the terminal into raw mode and starts reading input. This is the primary signal in production wiring — it is terminal protocol rather than rendered text, so it does not drift between Claude releases like the editor glyphs do, and it proves the reader is attached before fya types. While the marker is configured it also disables the quiet fallback, closing a race where the editor is painted (or the output merely goes quiet) before Claude reads, so the typed/pasted prompt is dropped. This race surfaces on slow terminal transports such as a Docker Desktop VM.
-2. An editor glyph such as `\n> `, `│ > `, `❯`, or `? for shortcuts`. Retained as a fallback for Claude builds that do not emit the marker.
+1. The input-ready marker: Claude emits `ESC[?2004h` (bracketed-paste enable, DECSET 2004) when it switches the terminal into raw mode and starts reading input. This is the primary signal in production wiring — it is terminal protocol rather than rendered text, so it does not drift between Claude releases like the editor glyphs do, and it proves the reader is attached before fya types. While the marker is configured it also disables the glyph and quiet fallbacks below, closing a race where the editor is painted (or the output merely goes quiet) before Claude reads, so the typed/pasted prompt is dropped. This race surfaces on slow terminal transports such as a Docker Desktop VM.
+2. An editor glyph such as `\n> `, `│ > `, or `? for shortcuts`. A fallback for Claude builds that do not emit the marker; like the quiet period it is disabled while the marker is configured.
 3. Otherwise, PTY output is non-empty and unchanged for the quiet period. Disabled while the input-ready marker is configured.
 
 Blocking prompts veto every path. These are dialogs that look stable but require user input fya cannot provide, such as Claude's trust prompt. Matching is whitespace- and escape-insensitive: Claude paints dialog text by positioning the cursor between words rather than emitting literal spaces, so a raw substring match can never catch a multi-word phrase. The output and the patterns are both stripped of escape sequences and whitespace before comparison.
 
 `Bypassing Permissions` is not a blocker. It is a status banner and must not prevent readiness when the prompt glyph is present.
 
-`--type-settle` adds a randomized pause (up to +20%) between readiness and typing, an extra margin on top of the gate for environments whose terminal I/O lags behind the marker. The randomization keeps the interval from being a constant timing fingerprint; the configured value is the floor.
+`--type-settle` adds a randomized pause (up to +20%) between readiness and typing — distinct from the injector's post-prompt 150 ms settle delay described under Typing — an extra margin on top of the gate for environments whose terminal I/O lags behind the marker. The randomization keeps the interval from being a constant timing fingerprint; the configured value is the floor. After the pause fya re-checks the latest output for a blocking dialog before typing, so a trust prompt that finishes rendering during the window (the marker can arrive before the column-positioned dialog text) is caught instead of being typed into.
 
 Readiness timeout is non-fatal in production wiring unless the captured output contains a blocking prompt. On a normal timeout, fya writes a warning and the captured Claude terminal tail to stderr, then continues. On a blocking-prompt timeout, fya returns an error instead of typing into the wrong UI. This gives diagnosis without corrupting stdout.
 
@@ -343,7 +343,7 @@ Important test areas:
 - CLI option splitting and forwarded flag ownership
 - stdin and stream-json prompt extraction
 - PTY lifecycle, Ctrl-C cleanup, and process-group fallback
-- readiness glyphs, quiet fallback, blocking prompt veto, and diagnostics
+- readiness input-ready marker, glyph/quiet fallbacks gated behind it, whitespace/escape-insensitive blocking prompt veto, post-settle blocker re-check, and diagnostics
 - typing WPM, jitter, multiline handling, and final Enter
 - transcript path encoding, prompt matching, complete-line tailing, and completion
 - Ralphex stream-json compatibility
