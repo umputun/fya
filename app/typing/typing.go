@@ -17,7 +17,6 @@ const (
 	defaultSettleDelay   = 150 * time.Millisecond
 	defaultWarnThreshold = 30 * time.Second
 	defaultCharsPerWord  = 5
-	newlineWithoutSubmit = "\x1b\r"
 	submitEnter          = "\r"
 	// bracketed-paste control sequences. Wrapping the prompt in these makes the
 	// terminal/TUI treat the entire body — embedded newlines included — as a
@@ -93,11 +92,12 @@ func (i *Injector) validate(prompt string) error {
 	return nil
 }
 
-// Type writes prompt to w and submits it with a final carriage return. By
-// default it types rune-by-rune with jittered delays; newlines emit ESC+CR so
-// the whole prompt stays in one Claude message. When ForcePaste is set, or
-// MaxWPMSize is set and the prompt is longer, Type uses bracketed paste instead
-// of per-rune pacing.
+// Type writes prompt to w and submits it with a final carriage return. A
+// single-line prompt is typed rune-by-rune with jittered delays. Any multi-line
+// prompt is sent via bracketed paste so embedded newlines stay literal and are
+// never read as a submit — the ESC+CR newline trick fragmented such prompts and
+// hung the turn. Setting ForcePaste, or MaxWPMSize with a longer prompt, also
+// forces bracketed paste.
 func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 	if w == nil {
 		return errors.New("typing writer is nil")
@@ -126,9 +126,13 @@ func (i *Injector) Type(ctx context.Context, w io.Writer, prompt string) error {
 }
 
 // pasteMode reports whether the prompt should be pasted in one shot instead of
-// typed rune-by-rune.
+// typed rune-by-rune. Any multi-line prompt is always pasted: typing it
+// rune-by-rune would emit the fragile ESC+CR for each newline, which Claude's
+// TUI intermittently reads as a submit and so fragments the prompt.
 func (i *Injector) pasteMode(prompt string) bool {
-	return i.cfg.ForcePaste || (i.cfg.MaxWPMSize > 0 && len(strings.Fields(prompt)) > i.cfg.MaxWPMSize)
+	return i.cfg.ForcePaste ||
+		strings.Contains(prompt, "\n") ||
+		(i.cfg.MaxWPMSize > 0 && len(strings.Fields(prompt)) > i.cfg.MaxWPMSize)
 }
 
 // paste writes the whole prompt in a single write without per-rune pacing,
@@ -153,13 +157,9 @@ func (i *Injector) paste(ctx context.Context, w io.Writer, prompt string) error 
 	return nil
 }
 
+// writeRune writes a single rune. It is only reached for single-line prompts;
+// multi-line prompts go through paste, so a newline never arrives here.
 func (i *Injector) writeRune(w io.Writer, r rune) error {
-	if r == '\n' {
-		if _, err := io.WriteString(w, newlineWithoutSubmit); err != nil {
-			return fmt.Errorf("write multiline newline: %w", err)
-		}
-		return nil
-	}
 	if _, err := io.WriteString(w, string(r)); err != nil {
 		return fmt.Errorf("write prompt rune: %w", err)
 	}

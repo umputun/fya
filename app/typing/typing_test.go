@@ -55,7 +55,9 @@ func TestTypeMultilinePrompt(t *testing.T) {
 	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), &out, "a\nb")
 
 	require.NoError(t, err)
-	assert.Equal(t, "a\x1b\rb\r", out.String())
+	assert.Equal(t, "\x1b[200~a\nb\x1b[201~\r", out.String(),
+		"any multi-line prompt is bracketed-pasted so the newline never reads as a submit")
+	assert.Len(t, sleep.delays, 1, "paste path uses only the settle delay, not rune-by-rune typing")
 }
 
 func TestTypePasteAboveThreshold(t *testing.T) {
@@ -208,7 +210,7 @@ func TestTypeNewlineWriteError(t *testing.T) {
 	err := NewInjector(Config{Jitter: -1, Sleeper: sleep.sleep}).Type(t.Context(), w, "\n")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "write multiline newline")
+	assert.Contains(t, err.Error(), "paste prompt")
 }
 
 func TestTypeSubmitWriteError(t *testing.T) {
