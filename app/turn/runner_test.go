@@ -1481,6 +1481,75 @@ func TestRunnerNoActivityTimeoutYieldsToContextCancel(t *testing.T) {
 	assert.NotEqual(t, "fya_no_activity_timeout", output.FinalCalls()[0].Result.TerminalReason)
 }
 
+func TestRunnerTypeSettle(t *testing.T) {
+	type recorder struct {
+		order  []string
+		slept  time.Duration
+		sleeps int
+	}
+	newRunner := func(rec *recorder, randVal float64) *turn.Runner {
+		return turn.NewRunner(turn.Dependencies{
+			ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+				return newSessionMock(), nil
+			}},
+			Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+				return ready.Result{Ready: true}, nil
+			}},
+			Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error {
+				rec.order = append(rec.order, "type")
+				return nil
+			}},
+			Catalog: &mocks.CatalogMock{SelectFunc: func(string, time.Time, string) (string, error) {
+				return "session.jsonl", nil
+			}},
+			TailerFactory: func(string) turn.Tailer {
+				return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+					return []transcript.Event{{Text: "answer", Result: true, SessionID: "s1"}}, true, nil
+				}}
+			},
+			Output: &mocks.OutputMock{TextFunc: func(string) error { return nil }, FinalFunc: func(stream.Result) error { return nil }},
+			Sleeper: func(_ context.Context, d time.Duration) error {
+				rec.slept = d
+				rec.sleeps++
+				rec.order = append(rec.order, "sleep")
+				return nil
+			},
+			Rand: func() float64 { return randVal },
+		})
+	}
+	cfg := func(settle time.Duration) turn.Config {
+		return turn.Config{CWD: ".", TurnTimeout: time.Minute, IdleTimeout: time.Second, Prompt: "hi", TypeSettle: settle}
+	}
+
+	t.Run("jittered upward and applied before typing", func(t *testing.T) {
+		var rec recorder
+		require.NoError(t, newRunner(&rec, 0.5).Run(t.Context(), cfg(200*time.Millisecond)))
+		// 200ms + 200ms*0.2*0.5 = 220ms
+		assert.Equal(t, 220*time.Millisecond, rec.slept)
+		assert.Equal(t, []string{"sleep", "type"}, rec.order)
+	})
+
+	t.Run("configured value is the floor with zero jitter", func(t *testing.T) {
+		var rec recorder
+		require.NoError(t, newRunner(&rec, 0).Run(t.Context(), cfg(200*time.Millisecond)))
+		assert.Equal(t, 200*time.Millisecond, rec.slept)
+	})
+
+	t.Run("never exceeds configured value plus jitter ceiling", func(t *testing.T) {
+		var rec recorder
+		require.NoError(t, newRunner(&rec, 0.999).Run(t.Context(), cfg(200*time.Millisecond)))
+		assert.Greater(t, rec.slept, 200*time.Millisecond)
+		assert.LessOrEqual(t, rec.slept, 240*time.Millisecond)
+	})
+
+	t.Run("disabled when zero", func(t *testing.T) {
+		var rec recorder
+		require.NoError(t, newRunner(&rec, 0.5).Run(t.Context(), cfg(0)))
+		assert.Zero(t, rec.sleeps, "settle sleeper must not run when TypeSettle is zero")
+		assert.Equal(t, []string{"type"}, rec.order)
+	})
+}
+
 func newSessionMock() *mocks.SessionMock {
 	return newSessionMockWithDone(make(chan struct{}))
 }

@@ -49,9 +49,10 @@ func defaultTurnRunner(req turnRunnerRequest) turnExecutor {
 	return turn.NewRunner(turn.Dependencies{
 		ProcessStarter: turn.NewPTYStarter(),
 		Readiness: ready.NewDetector(ready.Config{
-			Timeout:         cfg.ReadinessTimeout,
-			Warn:            req.Stderr,
-			NonFatalTimeout: true,
+			Timeout:          cfg.ReadinessTimeout,
+			Warn:             req.Stderr,
+			NonFatalTimeout:  true,
+			InputReadyMarker: ready.DefaultInputReadyMarker,
 		}),
 		Injector: typing.NewInjector(typingConfig(cfg, req.Stderr)),
 		Catalog:  transcript.NewCatalog(os.Getenv("FYA_CLAUDE_DIR")),
@@ -169,6 +170,7 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		NoActivityTimeout: cfg.NoActivityTimeout,
 		StreamEvents:      cfg.OutputFormat == stream.FormatStreamJSON,
 		Prompt:            prompt,
+		TypeSettle:        cfg.TypeSettle,
 	}); err != nil {
 		return fmt.Errorf("run turn: %w", err)
 	}

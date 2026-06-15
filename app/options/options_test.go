@@ -23,6 +23,7 @@ func TestParseConsumedFlags(t *testing.T) {
 		"--typing-jitter=0.35",
 		"--max-wpm-size=200",
 		"--readiness-timeout", "9s",
+		"--type-settle", "400ms",
 		"--dbg",
 		"hello",
 	})
@@ -36,6 +37,7 @@ func TestParseConsumedFlags(t *testing.T) {
 	assert.Equal(t, 3*time.Second, cfg.IdleTimeout)
 	assert.Equal(t, 5*time.Minute, cfg.TurnTimeout)
 	assert.Equal(t, 9*time.Second, cfg.ReadinessTimeout)
+	assert.Equal(t, 400*time.Millisecond, cfg.TypeSettle)
 	assert.Equal(t, "/tmp/repo", cfg.CWD)
 	assert.Equal(t, 125, cfg.TypingWPM)
 	assert.InEpsilon(t, 0.35, cfg.TypingJitter, 1e-9)
@@ -87,6 +89,7 @@ func TestParseDefaultsPrintText(t *testing.T) {
 	assert.Equal(t, 100, cfg.TypingWPM)
 	assert.InEpsilon(t, 0.20, cfg.TypingJitter, 1e-9)
 	assert.Equal(t, 100, cfg.MaxWPMSize)
+	assert.Equal(t, 250*time.Millisecond, cfg.TypeSettle)
 }
 
 func TestParseGateSetsNoActivityTimeout(t *testing.T) {
@@ -289,6 +292,7 @@ func TestParseValidatesWrapperControls(t *testing.T) {
 		{name: "jitter", args: []string{"--typing-jitter=-0.1"}, want: "typing-jitter must be non-negative"},
 		{name: "max wpm size", args: []string{"--max-wpm-size=-1"}, want: "max-wpm-size must be non-negative"},
 		{name: "turn timeout", args: []string{"--turn-timeout=0"}, want: "turn-timeout must be positive"},
+		{name: "type settle", args: []string{"--type-settle=-1s"}, want: "type-settle must be non-negative"},
 	}
 
 	for _, tt := range tests {

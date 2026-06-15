@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -98,6 +99,10 @@ type Config struct {
 	Prompt            string
 	StartedAt         time.Time
 	PollPeriod        time.Duration
+	// TypeSettle pauses between readiness and typing the prompt. It is an extra
+	// margin on top of the readiness gate for environments (e.g. a Docker Desktop
+	// VM) whose terminal I/O lags behind the input-ready marker. Zero disables it.
+	TypeSettle time.Duration
 }
 
 // Runner orchestrates a single Claude PTY turn through the injected dependencies.
@@ -108,19 +113,30 @@ type Runner struct {
 	catalog Catalog
 	tailers TailerFactory
 	output  Output
+	sleep   func(context.Context, time.Duration) error
+	rand    func() float64
 }
 
 // NewRunner returns a Runner wired with deps; missing fields cause Run to fail
 // fast with a clear error.
 func NewRunner(deps Dependencies) *Runner {
-	return &Runner{
+	r := &Runner{
 		starter: deps.ProcessStarter,
 		ready:   deps.Readiness,
 		inject:  deps.Injector,
 		catalog: deps.Catalog,
 		tailers: deps.TailerFactory,
 		output:  deps.Output,
+		sleep:   deps.Sleeper,
+		rand:    deps.Rand,
 	}
+	if r.sleep == nil {
+		r.sleep = r.realSleep
+	}
+	if r.rand == nil {
+		r.rand = r.randFloat64
+	}
+	return r
 }
 
 // Dependencies groups the collaborators Runner needs.
@@ -131,6 +147,12 @@ type Dependencies struct {
 	Catalog        Catalog
 	TailerFactory  TailerFactory
 	Output         Output
+	// Sleeper waits for a duration or until ctx is canceled; tests inject a fake
+	// so the TypeSettle pause is deterministic. Nil uses a real timer.
+	Sleeper func(context.Context, time.Duration) error
+	// Rand returns a uniform float in [0, 1) used to jitter the TypeSettle pause.
+	// Nil uses a non-cryptographic real source.
+	Rand func() float64
 }
 
 // Run executes one Claude turn: start the PTY, wait for readiness, type the
@@ -164,7 +186,7 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return r.finishCanceled(ctx, "start claude pty", "")
+			return r.finishCanceled(ctx, "start claude pty")
 		}
 		return fmt.Errorf("start claude pty: %w", err)
 	}
@@ -172,13 +194,21 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 
 	if _, readyErr := r.ready.Wait(ctx, session); readyErr != nil {
 		if ctx.Err() != nil {
-			return r.finishCanceled(ctx, "wait claude readiness", "")
+			return r.finishCanceled(ctx, "wait claude readiness")
 		}
 		return fmt.Errorf("wait claude readiness: %w", readyErr)
 	}
+	if cfg.TypeSettle > 0 {
+		if settleErr := r.sleep(ctx, r.settleDelay(cfg.TypeSettle)); settleErr != nil {
+			if ctx.Err() != nil {
+				return r.finishCanceled(ctx, "settle before type")
+			}
+			return fmt.Errorf("settle before type: %w", settleErr)
+		}
+	}
 	if typeErr := r.inject.Type(ctx, session, cfg.Prompt); typeErr != nil {
 		if ctx.Err() != nil {
-			return r.finishCanceled(ctx, "type prompt", "")
+			return r.finishCanceled(ctx, "type prompt")
 		}
 		return fmt.Errorf("type prompt: %w", typeErr)
 	}
@@ -435,8 +465,8 @@ func (r *Runner) handleSessionExit(ctx context.Context, tailer Tailer, s applySt
 	return errors.New("claude exited before turn completion")
 }
 
-func (r *Runner) finishCanceled(ctx context.Context, op, sessionID string) error {
-	if err := r.output.Final(r.cancelResult(sessionID, ctx)); err != nil {
+func (r *Runner) finishCanceled(ctx context.Context, op string) error {
+	if err := r.output.Final(r.cancelResult("", ctx)); err != nil {
 		return fmt.Errorf("write final output: %w", err)
 	}
 	return fmt.Errorf("%s: %w", op, r.ctxError(ctx))
@@ -468,6 +498,34 @@ func (r *Runner) ctxError(ctx context.Context) error {
 		return fmt.Errorf("context error: %w", err)
 	}
 	return fmt.Errorf("context error: %w: %w", err, cause)
+}
+
+// realSleep waits for d or until ctx is canceled. It is the default Sleeper used
+// when Dependencies.Sleeper is nil.
+func (*Runner) realSleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context done: %w", ctx.Err())
+	case <-timer.C:
+		return nil
+	}
+}
+
+// settleJitter is the upward randomization applied to the TypeSettle pause so it
+// is not a constant, fingerprintable interval; the configured value is the floor.
+const settleJitter = 0.2
+
+// settleDelay returns d extended by up to settleJitter of itself, keeping the
+// pause varied between invocations while never dropping below the configured
+// minimum margin.
+func (r *Runner) settleDelay(d time.Duration) time.Duration {
+	return d + time.Duration(float64(d)*settleJitter*r.rand())
+}
+
+func (*Runner) randFloat64() float64 {
+	return rand.Float64() //nolint:gosec // settle jitter does not need cryptographic randomness.
 }
 
 func (r *Runner) validate() error {

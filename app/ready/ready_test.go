@@ -223,6 +223,88 @@ func TestDetectorNilContext(t *testing.T) {
 	assert.Contains(t, err.Error(), "context is nil")
 }
 
+func TestDetectorInputReadyMarker(t *testing.T) {
+	src, state := newMockSource()
+	// no editor glyph and not quiet-eligible yet, but the input-ready marker is
+	// present, so readiness must fire on the marker alone.
+	state.setOutput("loading\x1b[?2004hmore output still streaming")
+
+	got, err := NewDetector(Config{
+		Timeout:          50 * time.Millisecond,
+		QuietPeriod:      time.Second,
+		PollInterval:     time.Millisecond,
+		InputReadyMarker: DefaultInputReadyMarker,
+	}).Wait(t.Context(), src)
+
+	require.NoError(t, err)
+	assert.True(t, got.Ready)
+	assert.Equal(t, "input-ready", got.Method)
+}
+
+// with the input-ready marker configured, the quiet-period fallback must NOT
+// promote a stable-but-unread editor to ready — that is the race the marker gate
+// closes. Without the marker present the detector should time out instead.
+func TestDetectorInputReadyMarkerGatesQuietFallback(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("Claude loading") // stable, no glyph, no marker
+	var warn bytes.Buffer
+
+	got, err := NewDetector(Config{
+		Timeout:          15 * time.Millisecond,
+		QuietPeriod:      time.Millisecond,
+		PollInterval:     time.Millisecond,
+		Warn:             &warn,
+		NonFatalTimeout:  true,
+		InputReadyMarker: DefaultInputReadyMarker,
+	}).Wait(t.Context(), src)
+
+	require.NoError(t, err)
+	assert.False(t, got.Ready)
+	assert.Equal(t, "timeout", got.Method, "quiet must not fire while the input-ready marker is absent")
+}
+
+// the real Claude trust dialog positions every word with cursor-move escapes and
+// also emits the input-ready marker. The blocking veto must still recognize the
+// dialog (via normalized matching) and win over the marker, so fya never types
+// into it.
+func TestDetectorBlockingPromptVetoesInputReadyWhenColumnPositioned(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("\x1b[?2004h\x1b[2GQuick\x1b[8Gsafety\x1b[15Gcheck:\x1b[22GIs\x1b[25Gthis\x1b[30Ga" +
+		"\x1b[32Gproject\x1b[40Gyou\x1b[44Gcreated\x1b[52Gor\x1b[55Gone\x1b[59Gyou\x1b[63Gtrust?")
+
+	got, err := NewDetector(Config{
+		Timeout:          20 * time.Millisecond,
+		QuietPeriod:      time.Second,
+		PollInterval:     time.Millisecond,
+		Warn:             &bytes.Buffer{},
+		NonFatalTimeout:  true,
+		InputReadyMarker: DefaultInputReadyMarker,
+	}).Wait(t.Context(), src)
+
+	require.Error(t, err)
+	assert.NotEqual(t, "input-ready", got.Method, "blocking dialog must override the input-ready marker")
+	assert.Equal(t, "timeout", got.Method)
+	assert.Contains(t, err.Error(), "blocked by prompt")
+}
+
+func TestDetectorNormalizeForMatch(t *testing.T) {
+	d := NewDetector(Config{})
+	tests := []struct {
+		name, in, want string
+	}{
+		{"plain", "abc", "abc"},
+		{"whitespace", "a b\tc\nd", "abcd"},
+		{"csi cursor move", "Quick\x1b[8Gsafety", "Quicksafety"},
+		{"sgr color", "\x1b[38;2;1;2;3mhi\x1b[39m", "hi"},
+		{"osc", "\x1b]11;?\x07x", "x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, d.normalizeForMatch(tt.in))
+		})
+	}
+}
+
 type sourceState struct {
 	mu       sync.Mutex
 	readOnce sync.Once

@@ -6,12 +6,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const maxTimeoutOutput = 4000
+
+// DefaultInputReadyMarker is the sequence Claude emits when it switches the
+// terminal into bracketed-paste mode (DECSET 2004) as it starts reading input.
+// It is the most reliable cross-version signal that the interactive editor is
+// attached and will accept a prompt — terminal protocol rather than rendered
+// text, so it does not drift between Claude releases like the editor glyphs do.
+// Production wiring assigns it to Config.InputReadyMarker; the zero-value Config
+// leaves the gate disabled.
+const DefaultInputReadyMarker = "\x1b[?2004h"
+
+// ansiEscape matches terminal escape sequences (OSC, CSI, and other ESC-led
+// sequences) so they can be stripped before rendered-text matching.
+var ansiEscape = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[\x20-\x2f]*[\x40-\x7e]|\x1b[()][0-9A-Za-z]|\x1b[=>]`)
 
 // Source supplies the live PTY output and an exit signal used to decide when
 // the wrapped Claude process is ready to receive a typed prompt.
@@ -31,11 +46,20 @@ type Config struct {
 	Warn            io.Writer
 	NonFatalTimeout bool
 	Glyphs          []string
-	// BlockingPrompts are substrings that, when visible in Output, veto the
-	// quiet-fallback readiness path. These are dialogs that LOOK stable but
-	// require user input that fya cannot supply (trust dialogs, setup prompts).
-	// Default values cover known Claude Code blockers.
+	// BlockingPrompts are substrings that, when visible in Output, veto every
+	// readiness path. These are dialogs that LOOK stable but require user input
+	// that fya cannot supply (trust dialogs, setup prompts). Matching is
+	// whitespace- and escape-insensitive (see hasBlockingPrompt) because Claude
+	// paints dialog text by positioning the cursor between words rather than
+	// emitting literal spaces. Default values cover known Claude Code blockers.
 	BlockingPrompts []string
+	// InputReadyMarker, when non-empty, is the byte sequence that proves Claude's
+	// interactive input reader is attached (production sets it to
+	// DefaultInputReadyMarker). While it is set, readiness fires as soon as the
+	// marker appears and the weaker quiet-period fallback is disabled, so fya
+	// never types into an editor that is painted but not yet reading. Empty keeps
+	// the legacy glyph/quiet behavior.
+	InputReadyMarker string
 }
 
 // Result describes the outcome of a Wait call: whether the source became ready,
@@ -109,17 +133,23 @@ func (d *Detector) Wait(ctx context.Context, src Source) (Result, error) {
 
 func (d *Detector) inspect(src Source, lastOutput string, lastChange time.Time) (Result, bool) {
 	current := src.Output()
-	// a visible blocking dialog vetoes BOTH readiness paths. If a glyph string
-	// ever appears as a substring of a known blocking dialog (now or in a
-	// future Claude UI), the dialog's input requirement takes precedence over
-	// the glyph match.
+	// a visible blocking dialog vetoes EVERY readiness path. If a glyph or the
+	// input-ready marker ever coincides with a known blocking dialog (now or in
+	// a future Claude UI), the dialog's input requirement takes precedence.
 	if d.hasBlockingPrompt(current) {
 		return Result{}, false
+	}
+	// the input-ready marker (bracketed-paste enable) is the most reliable signal
+	// that Claude's reader is attached, so it both fires readiness and disables
+	// the quiet fallback below — which can otherwise promote a painted-but-unread
+	// editor to ready and drop the typed/pasted prompt.
+	if d.hasInputReady(current) {
+		return Result{Ready: true, Method: "input-ready", Output: current}, true
 	}
 	if d.hasGlyph(current) {
 		return Result{Ready: true, Method: "glyph", Output: current}, true
 	}
-	if current != "" && current == lastOutput && time.Since(lastChange) >= d.cfg.QuietPeriod {
+	if d.cfg.InputReadyMarker == "" && current != "" && current == lastOutput && time.Since(lastChange) >= d.cfg.QuietPeriod {
 		return Result{Ready: true, Method: "quiet", Output: current}, true
 	}
 	return Result{}, false
@@ -151,6 +181,13 @@ func (d *Detector) emitTimeoutWarning(output string) {
 	}
 }
 
+// hasInputReady reports whether the configured input-ready marker is present in
+// the raw output. The marker is a terminal control sequence, so it is matched
+// against the raw stream rather than the normalized visible text.
+func (d *Detector) hasInputReady(output string) bool {
+	return d.cfg.InputReadyMarker != "" && strings.Contains(output, d.cfg.InputReadyMarker)
+}
+
 func (d *Detector) hasGlyph(output string) bool {
 	for _, glyph := range d.cfg.Glyphs {
 		if strings.Contains(output, glyph) {
@@ -160,13 +197,31 @@ func (d *Detector) hasGlyph(output string) bool {
 	return false
 }
 
+// hasBlockingPrompt reports whether any blocking-dialog pattern is visible.
+// Both the output and the patterns are normalized (escape sequences and all
+// whitespace removed) before matching: Claude renders dialog text by moving the
+// cursor between words instead of emitting literal spaces, so a plain
+// strings.Contains against the raw stream can never match a multi-word phrase.
 func (d *Detector) hasBlockingPrompt(output string) bool {
+	normalized := d.normalizeForMatch(output)
 	for _, blocker := range d.cfg.BlockingPrompts {
-		if strings.Contains(output, blocker) {
+		if strings.Contains(normalized, d.normalizeForMatch(blocker)) {
 			return true
 		}
 	}
 	return false
+}
+
+// normalizeForMatch strips terminal escape sequences and all whitespace from s
+// so rendered-text matching survives Claude's per-word cursor positioning.
+func (*Detector) normalizeForMatch(s string) string {
+	stripped := ansiEscape.ReplaceAllString(s, "")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, stripped)
 }
 
 func (c Config) withDefaults() Config {
@@ -182,23 +237,29 @@ func (c Config) withDefaults() Config {
 	if len(c.Glyphs) == 0 {
 		// only input-editor markers belong here. Status banners can appear
 		// before the editor is ready; blocking dialogs are handled separately
-		// below so real prompt glyphs still win when Claude is ready.
+		// below so real prompt glyphs still win when Claude is ready. These are
+		// a fallback for Claude builds that do not emit InputReadyMarker; the
+		// marker is the primary readiness signal in production wiring.
 		c.Glyphs = []string{
 			"\n> ",
 			"\r\n> ",
 			"│ > ",
 			"│> ",
+			"❯",
 			"? for shortcuts",
 		}
 	} else {
 		c.Glyphs = slices.Clone(c.Glyphs)
 	}
 	if c.BlockingPrompts == nil {
-		// known Claude Code dialogs that LOOK stable (so the quiet-period would
-		// otherwise mis-promote them to ready) but require user input fya
-		// cannot supply.
+		// known Claude Code dialogs that LOOK stable (so a readiness signal could
+		// otherwise mis-promote them to ready) but require user input fya cannot
+		// supply. Matching is whitespace/escape-insensitive, so these read as the
+		// human-visible phrasing regardless of how Claude positions the words.
 		c.BlockingPrompts = []string{
-			"Do you trust the files in this folder?",
+			"Do you trust the files in this folder?",         // legacy trust dialog
+			"Is this a project you created or one you trust", // current trust dialog heading
+			"Yes, I trust this folder",                       // current trust dialog accept option
 		}
 	} else {
 		c.BlockingPrompts = slices.Clone(c.BlockingPrompts)

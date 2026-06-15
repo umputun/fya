@@ -35,6 +35,7 @@ var (
 		"typing-jitter":     {},
 		"max-wpm-size":      {},
 		"readiness-timeout": {},
+		"type-settle":       {},
 	}
 	forwardBool = map[string]struct{}{
 		"allow-dangerously-skip-permissions":     {},
@@ -109,6 +110,7 @@ type Config struct {
 	TypingJitter       float64
 	MaxWPMSize         int
 	ReadinessTimeout   time.Duration
+	TypeSettle         time.Duration
 	Debug              bool
 	Version            bool
 	ClaudeArgs         []string
@@ -130,6 +132,7 @@ type rawOptions struct {
 	TypingJitter       float64       `long:"typing-jitter" default:"0.20" description:"per-character typing delay jitter ratio (0 disables jitter)"`
 	MaxWPMSize         int           `long:"max-wpm-size" default:"100" description:"paste prompt at once instead of typing when it is longer than N words (0 always types)"`
 	ReadinessTimeout   time.Duration `long:"readiness-timeout" default:"30s" description:"maximum wait for Claude input readiness"`
+	TypeSettle         time.Duration `long:"type-settle" default:"250ms" description:"pause after Claude readiness before typing the prompt"`
 	Debug              bool          `long:"dbg" env:"DEBUG" description:"enable fya debug logging (named --dbg to avoid collision with claude --debug)"`
 	Version            bool          `short:"V" long:"version" description:"show version info"`
 }
@@ -183,6 +186,7 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		TypingJitter:       raw.TypingJitter,
 		MaxWPMSize:         raw.MaxWPMSize,
 		ReadinessTimeout:   raw.ReadinessTimeout,
+		TypeSettle:         raw.TypeSettle,
 		Debug:              raw.Debug,
 		Version:            raw.Version,
 		ClaudeArgs:         split.claudeArgs,
@@ -226,6 +230,9 @@ func (c Config) validate() error {
 	}
 	if c.ReadinessTimeout < 0 {
 		return errors.New("readiness-timeout must be non-negative")
+	}
+	if c.TypeSettle < 0 {
+		return errors.New("type-settle must be non-negative")
 	}
 	if c.JSONSchema != "" && c.OutputFormat != "json" {
 		return errors.New("json-schema requires --output-format=json")

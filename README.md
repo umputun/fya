@@ -67,6 +67,7 @@ Wrapper controls:
 - `--typing-jitter=FLOAT` - per-character delay jitter ratio, default `0.20` (0 disables jitter)
 - `--max-wpm-size=N` - paste the prompt in one write instead of typing it when the prompt is longer than `N` words, default `100`. `0` always types rune-by-rune. Pasting avoids the multi-minute typing latency of large prompts; typing keeps shorter prompts arriving as individual keystrokes.
 - `--readiness-timeout=DURATION` - maximum wait for Claude input readiness, default `30s`
+- `--type-settle=DURATION` - pause after Claude readiness before typing the prompt, default `250ms`. An extra margin on top of the readiness gate for environments whose terminal I/O lags (for example a Docker Desktop VM). The pause is randomized up to +20% so it is not a constant interval; `0` disables it.
 - `--silent` - accepted for compatibility; fya does not emit synthetic tool-progress text
 - `--dbg` - enable fya debug logging. Named `--dbg` so it does not collide with Claude's own `--debug` flag, which is forwarded to Claude.
 
