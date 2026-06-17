@@ -147,7 +147,27 @@ func TestFilterEnv(t *testing.T) {
 		"_=/tmp/fya",
 	}}.filteredEnv()
 
-	assert.Equal(t, []string{"A=1", "ANTHROPIC_API_KEY=dummy"}, got)
+	assert.Equal(t, []string{"A=1", "ANTHROPIC_API_KEY=dummy", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1"}, got)
+}
+
+func TestFilterEnvForcesSyncSubagents(t *testing.T) {
+	t.Run("absent default added", func(t *testing.T) {
+		got := Config{Env: []string{"A=1"}}.filteredEnv()
+		assert.Contains(t, got, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+	})
+
+	t.Run("explicit value wins and is not duplicated", func(t *testing.T) {
+		got := Config{Env: []string{"A=1", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=0"}}.filteredEnv()
+		assert.Contains(t, got, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=0")
+		assert.NotContains(t, got, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+		count := 0
+		for _, e := range got {
+			if strings.HasPrefix(e, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=") {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count, "must not duplicate the key")
+	})
 }
 
 func TestConfigDefaults(t *testing.T) {
@@ -174,7 +194,9 @@ func TestConfigDefaultsPreservesExplicitEmptyEnv(t *testing.T) {
 	cfg := Config{Env: []string{}}.withDefaults()
 
 	assert.NotNil(t, cfg.Env)
-	assert.Empty(t, cfg.filteredEnv([]string{"SHOULD_NOT_INHERIT=1"}))
+	got := cfg.filteredEnv([]string{"SHOULD_NOT_INHERIT=1"})
+	assert.NotContains(t, got, "SHOULD_NOT_INHERIT=1", "explicit empty env must not inherit the parent env")
+	assert.Equal(t, []string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1"}, got, "fya still forces synchronous sub-agents")
 }
 
 func TestProcessNilSafeMethods(t *testing.T) {
