@@ -142,6 +142,12 @@ func (c Config) filteredEnv(inherited ...[]string) []string {
 	if c.Dir != "" {
 		filtered = c.withPWD(filtered)
 	}
+	// fya runs one ephemeral PTY turn; work backgrounded mid-turn (a sub-agent or a
+	// run_in_background Bash) outlives the turn and dies when the PTY is torn down.
+	// disable background tasks so sub-agents run synchronously and complete within the
+	// turn, matching the headless `claude -p` behavior fya stands in for, unless the
+	// caller set the knob explicitly.
+	filtered = c.withEnvDefault(filtered, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "1")
 	return filtered
 }
 
@@ -163,6 +169,17 @@ func (Config) withEnvValue(env []string, key, value string) []string {
 		}
 	}
 	return append(env, entry)
+}
+
+// withEnvDefault appends key=value only when key is not already present, so an
+// explicit caller value always wins over fya's default.
+func (Config) withEnvDefault(env []string, key, value string) []string {
+	for _, current := range env {
+		if currentKey, _, ok := strings.Cut(current, "="); ok && currentKey == key {
+			return env
+		}
+	}
+	return append(env, key+"="+value)
 }
 
 func (Config) isPrivateEnvKey(key string) bool {

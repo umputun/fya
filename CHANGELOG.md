@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- Force synchronous sub-agents in the child Claude by defaulting `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` (set only when the caller has not set it). Claude Code 2.1.x launches `Agent`/`Task` sub-agents in the background by default; under fya's single ephemeral PTY turn the main turn ends while those agents are still detached, and fya tears down the PTY before they finish — so orchestrators relying on parallel sub-agents (for example ralphex's review phase) received empty results. Forcing foreground execution makes the sub-agents complete within the turn, matching the headless `claude -p` behavior fya stands in for.
+
 ## v0.3.4 - 2026-06-16
 
 ### Bug Fixes
