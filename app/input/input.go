@@ -13,17 +13,20 @@ import (
 // the positional args.
 var ErrEmptyPrompt = errors.New("prompt is required")
 
-// newlineNormalizer collapses internal CRLF and lone CR to LF so the resolved
-// prompt carries only LF newlines. Downstream, typed mode translates each LF to
-// an ESC+CR multiline insert and paste mode wraps the whole body in
-// bracketed-paste markers; either way a bare CR would instead read as Enter and
-// submit the prompt early. The same normalized prompt is later matched against
-// the Claude transcript, so normalizing once here keeps injection and transcript
-// selection consistent.
-var newlineNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+// promptNormalizer makes whitespace deliverable through Claude's TUI: it folds
+// CRLF and lone CR to LF (a bare CR would read as Enter and submit early) and
+// expands each tab to four spaces. A tab cannot be delivered literally — typed
+// rune-by-rune Claude's TUI reads it as an autocomplete key, and even inside a
+// bracketed paste it wedges the turn — so it is converted to spaces, the only
+// whitespace besides LF that survives. The same normalized prompt is later
+// matched against the Claude transcript, so normalizing once here keeps
+// injection and transcript selection consistent.
+var promptNormalizer = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\t", "    ")
 
 // Request describes the prompt source for one turn. ReplayUserMessages controls
-// whether stream-json user records are re-emitted on Stdout for visibility.
+// whether stream-json user records are re-emitted on Stdout for visibility. Warn,
+// when set, receives a one-line notice listing any undeliverable control
+// characters stripped from the resolved prompt.
 type Request struct {
 	Args               []string
 	Stdin              io.Reader
@@ -31,6 +34,7 @@ type Request struct {
 	Stdout             io.Writer
 	InputFormat        string
 	ReplayUserMessages bool
+	Warn               io.Writer
 }
 
 // Reader resolves a prompt from a Request, picking the correct parsing path
@@ -61,7 +65,7 @@ func (r *Reader) readText() (string, error) {
 	prompt := strings.Join(r.req.Args, " ")
 	if strings.TrimSpace(prompt) != "" {
 		// Positional prompts are finite and must not wait on an attached but open stdin pipe.
-		return newlineNormalizer.Replace(prompt), nil
+		return r.finalize(prompt), nil
 	}
 	if r.req.StdinHasData {
 		data, err := io.ReadAll(r.req.Stdin)
@@ -75,7 +79,7 @@ func (r *Reader) readText() (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", ErrEmptyPrompt
 	}
-	return newlineNormalizer.Replace(prompt), nil
+	return r.finalize(prompt), nil
 }
 
 func (r *Reader) readStreamJSON() (string, error) {
@@ -98,7 +102,58 @@ func (r *Reader) readStreamJSON() (string, error) {
 			return "", fmt.Errorf("replay user message: %w", err)
 		}
 	}
-	return newlineNormalizer.Replace(userPrompt), nil
+	return r.finalize(userPrompt), nil
+}
+
+// finalize normalizes newlines then strips control characters Claude's TUI
+// cannot accept as literal text, warning once when any are dropped. Running it at
+// the single input boundary keeps the injected prompt identical to the one later
+// matched against the transcript.
+func (r *Reader) finalize(prompt string) string {
+	cleaned, total, distinct := stripUndeliverable(promptNormalizer.Replace(prompt))
+	if total > 0 && r.req.Warn != nil {
+		codes := make([]string, len(distinct))
+		for i, c := range distinct {
+			codes[i] = fmt.Sprintf("0x%02x", c)
+		}
+		fmt.Fprintf(r.req.Warn, "warning: removed %d undeliverable control character(s) from prompt: %s\n",
+			total, strings.Join(codes, " "))
+	}
+	return cleaned
+}
+
+// isUndeliverable reports whether r is a control character Claude's interactive
+// TUI cannot receive as literal prompt text. Typed rune-by-rune such bytes are
+// read as control keys (ESC clears the input line) and silently wedge the turn;
+// even inside a bracketed paste, ESC and DEL corrupt the input. LF is the only
+// control character kept — CR is already folded to LF and tabs expanded to spaces
+// by promptNormalizer before this runs.
+func isUndeliverable(r rune) bool {
+	return r == 0x7f || (r < 0x20 && r != '\n')
+}
+
+// stripUndeliverable removes every undeliverable control rune from s, returning
+// the cleaned string, the total number removed, and the distinct runes removed in
+// first-seen order for reporting. The common no-control path allocates nothing.
+func stripUndeliverable(s string) (cleaned string, total int, distinct []rune) {
+	if !strings.ContainsFunc(s, isUndeliverable) {
+		return s, 0, nil
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	seen := make(map[rune]bool)
+	for _, r := range s {
+		if isUndeliverable(r) {
+			total++
+			if !seen[r] {
+				seen[r] = true
+				distinct = append(distinct, r)
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String(), total, distinct
 }
 
 type streamJSONParser struct {
