@@ -120,8 +120,7 @@ func TestReadTextStripWarning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ab", got)
 	assert.Contains(t, warn.String(), "removed 3 undeliverable", "total count includes the repeated esc")
-	assert.Contains(t, warn.String(), "0x1b")
-	assert.Contains(t, warn.String(), "0x07")
+	assert.Contains(t, warn.String(), "0x1b 0x07", "codes are deduped and listed in first-seen order")
 }
 
 func TestReadTextNoWarningWhenClean(t *testing.T) {
