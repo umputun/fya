@@ -108,7 +108,7 @@ func TestReadStreamJSONControlOnlyPromptNotReplayed(t *testing.T) {
 		ReplayUserMessages: true,
 	}).Read()
 
-	assert.ErrorIs(t, err, ErrEmptyPrompt)
+	require.ErrorIs(t, err, ErrEmptyPrompt)
 	assert.Empty(t, out.String(), "a prompt rejected as empty must not be replayed to stdout first")
 }
 
