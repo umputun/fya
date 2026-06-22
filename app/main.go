@@ -141,6 +141,7 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		Stdout:             req.Stdout,
 		InputFormat:        cfg.InputFormat,
 		ReplayUserMessages: cfg.ReplayUserMessages,
+		Warn:               req.Stderr,
 	}).Read()
 	if err != nil {
 		return fmt.Errorf("read prompt: %w", err)

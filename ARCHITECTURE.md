@@ -101,7 +101,9 @@ Text mode:
 - trailing `\r\n` is trimmed
 - a missing trailing newline is fine
 - internal `\r\n` and lone `\r` are normalized to `\n` so the resolved prompt carries only LF newlines
-- empty or whitespace-only prompts fail with `input.ErrEmptyPrompt`
+- tabs are expanded to four spaces (Claude's TUI reads a literal tab as an autocomplete key and wedges the turn)
+- undeliverable control characters (C0 controls except LF, plus DEL) are stripped, with a one-line warning listing the removed bytes
+- empty or whitespace-only prompts fail with `input.ErrEmptyPrompt`; the check runs after stripping, so a control-only prompt that strips to empty fails the same way
 
 Stream-json input:
 
@@ -110,6 +112,7 @@ Stream-json input:
 - extracts exactly one user message
 - rejects multiple user messages by design
 - normalizes the extracted prompt's internal `\r\n` and lone `\r` to `\n` (the replayed raw event keeps its original bytes)
+- expands tabs and strips undeliverable control characters from the extracted prompt the same way as text mode, validating before any replay so a prompt that strips to empty is rejected without emitting the raw event
 - optionally replays the accepted raw user event when `--replay-user-messages` is set
 
 Prompt submission is independent of the stdin newline. `app/typing` always sends final Enter (`\r`) after typing the prompt.

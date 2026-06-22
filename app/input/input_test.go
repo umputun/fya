@@ -36,6 +36,103 @@ func TestReadText(t *testing.T) {
 	}
 }
 
+func TestReadTextStripsControlChars(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "strips trailing esc", in: "Reply: OK\x1b", want: "Reply: OK"},
+		{name: "strips mid esc", in: "a\x1bb", want: "ab"},
+		{name: "strips assorted c0 and del", in: "x\x01\x07\x1b\x7fy", want: "xy"},
+		{name: "keeps newline, converts tab to spaces", in: "a\tb\nc", want: "a    b\nc"},
+		{name: "strips bell, converts tab", in: "a\x07\tb", want: "a    b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewReader(Request{Stdin: strings.NewReader(tt.in), StdinHasData: true, InputFormat: "text"}).Read()
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReadStreamJSONStripsControlChars(t *testing.T) {
+	in := `{"type":"user","message":{"content":"hello\u001bworld"}}`
+
+	got, err := NewReader(Request{Stdin: strings.NewReader(in), StdinHasData: true, InputFormat: "stream-json"}).Read()
+
+	require.NoError(t, err)
+	assert.Equal(t, "helloworld", got, "control characters are stripped from stream-json prompts too")
+}
+
+func TestReadTextRejectsControlOnlyPrompt(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		in   string
+		has  bool
+	}{
+		{name: "stdin esc only", in: "\x1b", has: true},
+		{name: "stdin assorted controls", in: "\x01\x07\x1b\x7f", has: true},
+		{name: "stdin tab and esc strip to blank", in: "\t\x1b", has: true},
+		{name: "positional esc only", args: []string{"\x1b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewReader(Request{Args: tt.args, Stdin: strings.NewReader(tt.in), StdinHasData: tt.has, InputFormat: "text"}).Read()
+			assert.ErrorIs(t, err, ErrEmptyPrompt, "prompt that strips to empty must not pass as a bare submit")
+		})
+	}
+}
+
+func TestReadStreamJSONRejectsControlOnlyPrompt(t *testing.T) {
+	in := `{"type":"user","message":{"content":"\u001b"}}`
+
+	_, err := NewReader(Request{Stdin: strings.NewReader(in), StdinHasData: true, InputFormat: "stream-json"}).Read()
+
+	assert.ErrorIs(t, err, ErrEmptyPrompt)
+}
+
+func TestReadStreamJSONControlOnlyPromptNotReplayed(t *testing.T) {
+	const raw = `{"type":"user","content":"\u001b"}`
+	var out bytes.Buffer
+
+	_, err := NewReader(Request{
+		Stdin:              strings.NewReader(raw + "\n"),
+		StdinHasData:       true,
+		Stdout:             &out,
+		InputFormat:        "stream-json",
+		ReplayUserMessages: true,
+	}).Read()
+
+	require.ErrorIs(t, err, ErrEmptyPrompt)
+	assert.Empty(t, out.String(), "a prompt rejected as empty must not be replayed to stdout first")
+}
+
+func TestReadTextStripWarning(t *testing.T) {
+	var warn bytes.Buffer
+
+	got, err := NewReader(Request{Stdin: strings.NewReader("a\x1b\x07b\x1b"), StdinHasData: true, InputFormat: "text", Warn: &warn}).Read()
+
+	require.NoError(t, err)
+	assert.Equal(t, "ab", got)
+	assert.Contains(t, warn.String(), "removed 3 undeliverable", "total count includes the repeated esc")
+	assert.Contains(t, warn.String(), "0x1b 0x07", "codes are deduped and listed in first-seen order")
+}
+
+func TestReadTextNoWarningWhenClean(t *testing.T) {
+	var warn bytes.Buffer
+
+	got, err := NewReader(Request{Stdin: strings.NewReader("a\tb\nc"), StdinHasData: true, InputFormat: "text", Warn: &warn}).Read()
+
+	require.NoError(t, err)
+	assert.Equal(t, "a    b\nc", got, "tab is silently expanded to spaces, newline kept")
+	assert.Empty(t, warn.String(), "newline kept and tab converted (not stripped), so no warning")
+}
+
 func TestReadTextEmptyPrompt(t *testing.T) {
 	_, err := NewReader(Request{Stdin: strings.NewReader(" \n"), StdinHasData: true, InputFormat: "text"}).Read()
 
