@@ -3,6 +3,7 @@ package transcript
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,6 +140,38 @@ func TestCatalogSelectRalphexSignalPrompt(t *testing.T) {
 	require.NoError(t, os.WriteFile(transcriptPath, []byte(body+"\n"), 0o600))
 
 	got, err := cat.Select(cwd, time.Now().Add(-time.Minute), "line1\nOutput exactly: <<<RALPHEX:ALL_TASKS_DONE>>>")
+
+	require.NoError(t, err)
+	assert.Equal(t, transcriptPath, got)
+}
+
+// large prompts are pasted into Claude, and paste handling can alter the source
+// body so the stored transcript copy is not byte-identical to the injected
+// prompt. A whole-prompt match then fails. Select must still locate the
+// transcript via the prompt prefix, which is injected before any drift.
+func TestCatalogSelectDriftedBodyMatchesByPrefix(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	// header must exceed promptMatchPrefixRunes so the matched prefix lands
+	// entirely within the clean, drift-free region (as a real headless prompt's
+	// task header and source URL do before the pasted source body begins).
+	header := "You are running headless. Use the skill to produce ONE output. " +
+		"URL: https://example.com/a/b/c/distinctive-source-path so the prefix stays unique. " +
+		"Do NOT produce other variants. Write outputs ONLY into the target directory and nowhere else at all, period, full stop, end of the clean header region. "
+	require.Greater(t, len([]rune(header)), promptMatchPrefixRunes)
+	body := strings.Repeat("source-token ", 4000)
+	injected := header + body
+	// the stored copy keeps the header intact but drifts in the body.
+	stored := header + strings.ReplaceAll(body, "source-token ", "source-token  ")
+	transcriptPath := filepath.Join(dir, "session.jsonl")
+	require.NoError(t, os.WriteFile(transcriptPath, []byte(stored), 0o600))
+
+	got, err := cat.Select(cwd, time.Now().Add(-time.Minute), injected)
 
 	require.NoError(t, err)
 	assert.Equal(t, transcriptPath, got)
