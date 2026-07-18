@@ -3,6 +3,7 @@ package ready
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,40 @@ func TestDetectorGlyphReadiness(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.Ready)
 	assert.Equal(t, "glyph", got.Method)
+}
+
+// the 2.1.214 editor prompt is the arrow glyph (U+276F); with no marker
+// configured, its line-anchored form promotes readiness via the glyph path.
+func TestDetectorArrowGlyphReadiness(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("Claude\n❯ ")
+
+	got, err := NewDetector(testConfig()).Wait(t.Context(), src)
+
+	require.NoError(t, err)
+	assert.True(t, got.Ready)
+	assert.Equal(t, "glyph", got.Method)
+}
+
+// defense-in-depth: the arrow-prompt glyph appearing inside a known blocking
+// dialog must not promote readiness — the dialog veto runs before the glyph
+// check, so we never type into the wrong UI.
+func TestDetectorBlockingPromptVetoesArrowGlyph(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("Do you trust the files in this folder?\n❯ ") // contains "\n❯ " glyph AND trust blocker
+
+	got, err := NewDetector(Config{
+		Timeout:         20 * time.Millisecond,
+		QuietPeriod:     time.Second,
+		PollInterval:    time.Millisecond,
+		Warn:            &bytes.Buffer{},
+		NonFatalTimeout: true,
+	}).Wait(t.Context(), src)
+
+	require.Error(t, err)
+	assert.NotEqual(t, "glyph", got.Method, "blocking dialog veto must override the arrow-prompt glyph")
+	assert.Equal(t, "timeout", got.Method, "should fall through to timeout when veto fires")
+	assert.Contains(t, err.Error(), "blocked by prompt")
 }
 
 func TestDetectorQuietFallback(t *testing.T) {
@@ -225,13 +260,14 @@ func TestDetectorNilContext(t *testing.T) {
 
 func TestDetectorInputReadyMarker(t *testing.T) {
 	src, state := newMockSource()
-	// no editor glyph and not quiet-eligible yet, but the input-ready marker is
-	// present, so readiness must fire on the marker alone.
-	state.setOutput("loading\x1b[?2004hmore output still streaming")
+	// the input-ready marker is present and the output is stable, so readiness
+	// fires on the marker once the quiet window has elapsed.
+	state.setOutput("\x1b[?2004hidle prompt")
 
+	started := time.Now()
 	got, err := NewDetector(Config{
-		Timeout:          50 * time.Millisecond,
-		QuietPeriod:      time.Second,
+		Timeout:          time.Second,
+		QuietPeriod:      10 * time.Millisecond,
 		PollInterval:     time.Millisecond,
 		InputReadyMarker: DefaultInputReadyMarker,
 	}).Wait(t.Context(), src)
@@ -239,6 +275,115 @@ func TestDetectorInputReadyMarker(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.Ready)
 	assert.Equal(t, "input-ready", got.Method)
+	assert.Equal(t, "\x1b[?2004hidle prompt", got.Output)
+	// readiness must wait out the quiet window, not fire on the marker alone.
+	assert.GreaterOrEqual(t, time.Since(started), 10*time.Millisecond)
+}
+
+// a marker seen while output is still changing (startup paint) must NOT fire
+// readiness; the detector holds until the output settles, and here it never does
+// so it times out. Firing on the marker alone would promote a still-painting
+// editor and drop the opening prompt characters.
+func TestDetectorInputReadyMarkerHeldDuringPaint(t *testing.T) {
+	done := make(chan struct{})
+	var n int
+	src := &mocks.SourceMock{
+		OutputFunc: func() string {
+			n++
+			return fmt.Sprintf("\x1b[?2004hpaint %d", n) // marker present, text never stable
+		},
+		DoneFunc: func() <-chan struct{} { return done },
+	}
+
+	got, err := NewDetector(Config{
+		Timeout:          30 * time.Millisecond,
+		QuietPeriod:      10 * time.Millisecond,
+		PollInterval:     time.Millisecond,
+		Warn:             &bytes.Buffer{},
+		NonFatalTimeout:  true,
+		InputReadyMarker: DefaultInputReadyMarker,
+	}).Wait(t.Context(), src)
+
+	require.NoError(t, err)
+	assert.Equal(t, "timeout", got.Method, "marker seen during ongoing paint must not fire readiness")
+	assert.NotEqual(t, "input-ready", got.Method)
+}
+
+// with a marker present the whole time, readiness fires only after the output
+// stops changing for QuietPeriod. Mirrors TestDetectorQuietFallbackResetsOnOutputChange:
+// the output changes once mid-wait, so the earliest fire is QuietPeriod after
+// that change.
+func TestDetectorInputReadyMarkerFiresAfterOutputStabilizes(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("\x1b[?2004hpaint 1")
+
+	state.readCh = make(chan struct{})
+	started := time.Now()
+	done := make(chan Result, 1)
+	errs := make(chan error, 1)
+	go func() {
+		got, err := NewDetector(Config{
+			Timeout:          time.Second,
+			QuietPeriod:      40 * time.Millisecond,
+			PollInterval:     5 * time.Millisecond,
+			InputReadyMarker: DefaultInputReadyMarker,
+		}).Wait(t.Context(), src)
+		done <- got
+		errs <- err
+	}()
+
+	<-state.readCh
+	time.Sleep(20 * time.Millisecond)
+	state.setOutput("\x1b[?2004hpaint 2")
+
+	got := <-done
+	err := <-errs
+	require.NoError(t, err)
+	assert.True(t, got.Ready)
+	assert.Equal(t, "input-ready", got.Method)
+	assert.Equal(t, "\x1b[?2004hpaint 2", got.Output)
+	assert.GreaterOrEqual(t, time.Since(started), 55*time.Millisecond)
+}
+
+// the input-ready marker appears early and is then evicted from the capped 64 KiB
+// PTY tail buffer during a long startup paint: the current output no longer
+// contains the marker by the time it settles. Because the Wait loop latches
+// "marker seen", readiness must still fire once the output stabilizes — dropping
+// the marker from the later output is a faithful, deterministic stand-in for
+// eviction. A marker seen once must keep readiness reachable even after it leaves
+// the current buffer snapshot.
+func TestDetectorInputReadyMarkerLatchesAcrossBufferEviction(t *testing.T) {
+	src, state := newMockSource()
+	state.setOutput("\x1b[?2004hpaint 1") // marker present in the first read, latching markerSeen
+
+	state.readCh = make(chan struct{})
+	started := time.Now()
+	done := make(chan Result, 1)
+	errs := make(chan error, 1)
+	go func() {
+		got, err := NewDetector(Config{
+			Timeout:          time.Second,
+			QuietPeriod:      40 * time.Millisecond,
+			PollInterval:     5 * time.Millisecond,
+			InputReadyMarker: DefaultInputReadyMarker,
+		}).Wait(t.Context(), src)
+		done <- got
+		errs <- err
+	}()
+
+	<-state.readCh
+	time.Sleep(20 * time.Millisecond)
+	// the early marker has been evicted: the current output no longer contains it,
+	// and never will again. Readiness must still fire off the latched sighting.
+	state.setOutput("settled prompt without marker")
+
+	got := <-done
+	err := <-errs
+	require.NoError(t, err)
+	assert.True(t, got.Ready)
+	assert.Equal(t, "input-ready", got.Method)
+	assert.Equal(t, "settled prompt without marker", got.Output)
+	assert.GreaterOrEqual(t, time.Since(started), 55*time.Millisecond)
 }
 
 // the real Claude trust dialog positions every word with cursor-move escapes and
@@ -250,9 +395,12 @@ func TestDetectorBlockingPromptVetoesInputReadyWhenColumnPositioned(t *testing.T
 	state.setOutput("\x1b[?2004h\x1b[2GQuick\x1b[8Gsafety\x1b[15Gcheck:\x1b[22GIs\x1b[25Gthis\x1b[30Ga" +
 		"\x1b[32Gproject\x1b[40Gyou\x1b[44Gcreated\x1b[52Gor\x1b[55Gone\x1b[59Gyou\x1b[63Gtrust?")
 
+	// QuietPeriod is small so the stable marker output would fire input-ready were
+	// the inspect-time veto absent — the veto is therefore the sole reason this
+	// times out, keeping the test load-bearing on the veto.
 	got, err := NewDetector(Config{
 		Timeout:          20 * time.Millisecond,
-		QuietPeriod:      time.Second,
+		QuietPeriod:      time.Millisecond,
 		PollInterval:     time.Millisecond,
 		Warn:             &bytes.Buffer{},
 		NonFatalTimeout:  true,

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.6 - 2026-07-18
+
+### Bug Fixes
+
+- Require the output to settle before typing when readiness is gated on the input-ready marker, correcting the v0.3.4 gating. v0.3.4 treated the marker (`ESC[?2004h`, bracketed-paste enable) as proof the reader was attached, but on Claude Code 2.1.214 the marker fires during startup paint — roughly 800ms before the editor actually reads input — so fya typed the prompt too early, the opening characters were dropped, the stored transcript prompt no longer matched what the catalog searched for, and the turn polled to the turn timeout with no output. Readiness now requires the marker AND the output staying non-empty and unchanged for the quiet period, confirming the editor has stopped painting before fya types; this can only fire later than the old gate, never earlier, so the pre-marker quiet-only early-fire risk cannot return. The marker-less glyph fallback list is also refreshed for the 2.1.214 editor prompt (`❯`, line-anchored).
+
 ## v0.3.5 - 2026-06-16
 
 ### Bug Fixes
