@@ -16,10 +16,12 @@ import (
 const maxTimeoutOutput = 4000
 
 // DefaultInputReadyMarker is the sequence Claude emits when it switches the
-// terminal into bracketed-paste mode (DECSET 2004) as it starts reading input.
-// It is the most reliable cross-version signal that the interactive editor is
-// attached and will accept a prompt — terminal protocol rather than rendered
-// text, so it does not drift between Claude releases like the editor glyphs do.
+// terminal into bracketed-paste mode (DECSET 2004). Its bytes are terminal
+// protocol rather than rendered text, so they do not drift between Claude
+// releases like the editor glyphs do — but the marker's timing relative to the
+// editor attaching does drift: Claude Code 2.1.214 emits it during startup
+// paint, before the editor reads, so presence alone does not prove the reader is
+// attached. Readiness therefore pairs the marker with a stable output window.
 // Production wiring assigns it to Config.InputReadyMarker; the zero-value Config
 // leaves the gate disabled.
 const DefaultInputReadyMarker = "\x1b[?2004h"
@@ -53,12 +55,12 @@ type Config struct {
 	// paints dialog text by positioning the cursor between words rather than
 	// emitting literal spaces. Default values cover known Claude Code blockers.
 	BlockingPrompts []string
-	// InputReadyMarker, when non-empty, is the byte sequence that proves Claude's
-	// interactive input reader is attached (production sets it to
-	// DefaultInputReadyMarker). While it is set, readiness fires as soon as the
-	// marker appears and the weaker quiet-period fallback is disabled, so fya
-	// never types into an editor that is painted but not yet reading. Empty keeps
-	// the legacy glyph/quiet behavior.
+	// InputReadyMarker, when non-empty, is the byte sequence Claude emits when it
+	// switches into bracketed-paste mode (production sets it to
+	// DefaultInputReadyMarker). While it is set, readiness requires the marker to
+	// have been seen AND a stable output window (QuietPeriod); the glyph and
+	// standalone quiet fallbacks apply only when no marker is configured. Empty
+	// keeps the legacy glyph/quiet behavior.
 	InputReadyMarker string
 }
 
@@ -71,10 +73,10 @@ type Result struct {
 	Output string
 }
 
-// Detector polls a Source until it appears ready for input. The primary signal
-// is the configured input-ready marker (Claude's bracketed-paste enable); the
-// input-prompt glyphs and the quiet period are fallbacks used only when no
-// marker is configured.
+// Detector polls a Source until it appears ready for input. When an input-ready
+// marker is configured (production), readiness requires the marker to have been
+// seen plus a stable output window (QuietPeriod). The input-prompt glyphs and the
+// standalone quiet period are fallbacks used only when no marker is configured.
 type Detector struct {
 	cfg Config
 }
@@ -102,8 +104,8 @@ func (d *Detector) Wait(ctx context.Context, src Source) (Result, error) {
 	ticker := time.NewTicker(d.cfg.PollInterval)
 	defer ticker.Stop()
 
-	lastOutput := src.Output()
-	lastChange := time.Now()
+	initial := src.Output()
+	st := scanState{lastOutput: initial, lastChange: time.Now(), markerSeen: d.hasInputReady(initial)}
 
 	for {
 		select {
@@ -112,7 +114,9 @@ func (d *Detector) Wait(ctx context.Context, src Source) (Result, error) {
 		default:
 		}
 
-		if result, ok := d.inspect(src, lastOutput, lastChange); ok {
+		current := src.Output()
+		st.markerSeen = st.markerSeen || d.hasInputReady(current)
+		if result, ok := d.inspect(current, st); ok {
 			return result, nil
 		}
 
@@ -124,37 +128,61 @@ func (d *Detector) Wait(ctx context.Context, src Source) (Result, error) {
 		case <-deadline.C:
 			return d.timeout(src.Output())
 		case <-ticker.C:
-			current := src.Output()
-			if current != lastOutput {
-				lastOutput = current
-				lastChange = time.Now()
+			current = src.Output()
+			st.markerSeen = st.markerSeen || d.hasInputReady(current)
+			if current != st.lastOutput {
+				st.lastOutput = current
+				st.lastChange = time.Now()
 			}
 		}
 	}
 }
 
-func (d *Detector) inspect(src Source, lastOutput string, lastChange time.Time) (Result, bool) {
-	current := src.Output()
+// scanState carries the poll-to-poll state the Wait loop threads through inspect:
+// the last observed output and when it last changed (for the quiet-window check),
+// plus a latch recording that the input-ready marker was seen at least once. Every
+// output read the Wait loop takes folds into markerSeen before it is used, so no
+// read can observe the marker without latching it. The latch never resets, so a
+// marker evicted from the capped PTY tail buffer during a long startup paint cannot
+// un-see it.
+type scanState struct {
+	lastOutput string
+	lastChange time.Time
+	markerSeen bool
+}
+
+// inspect evaluates the readiness vetoes and paths against current — the output
+// snapshot the Wait loop has already folded into st.markerSeen — so it takes no
+// fresh read of its own and no output read can bypass the marker latch.
+func (d *Detector) inspect(current string, st scanState) (Result, bool) {
 	// a visible blocking dialog vetoes EVERY readiness path. If a glyph or the
 	// input-ready marker ever coincides with a known blocking dialog (now or in
 	// a future Claude UI), the dialog's input requirement takes precedence.
 	if d.hasBlockingPrompt(current) {
 		return Result{}, false
 	}
-	// the input-ready marker (bracketed-paste enable) is the most reliable signal
-	// that Claude's reader is attached, so it both fires readiness and, while
-	// configured, disables the weaker glyph and quiet fallbacks below — which can
-	// otherwise promote a painted-but-unread editor to ready and drop the prompt.
-	if d.hasInputReady(current) {
-		return Result{Ready: true, Method: "input-ready", Output: current}, true
+	if d.cfg.InputReadyMarker != "" {
+		// readiness requires the latched marker sighting (see scanState) AND a stable
+		// output window; the glyph and standalone quiet fallbacks stay disabled here.
+		if st.markerSeen && d.isQuiet(current, st.lastOutput, st.lastChange) {
+			return Result{Ready: true, Method: "input-ready", Output: current}, true
+		}
+		return Result{}, false
 	}
-	if d.cfg.InputReadyMarker == "" && d.hasGlyph(current) {
+	if d.hasGlyph(current) {
 		return Result{Ready: true, Method: "glyph", Output: current}, true
 	}
-	if d.cfg.InputReadyMarker == "" && current != "" && current == lastOutput && time.Since(lastChange) >= d.cfg.QuietPeriod {
+	if d.isQuiet(current, st.lastOutput, st.lastChange) {
 		return Result{Ready: true, Method: "quiet", Output: current}, true
 	}
 	return Result{}, false
+}
+
+// isQuiet reports whether output has been non-empty and unchanged for QuietPeriod
+// — long enough to count as settled (the editor has stopped painting). Both the
+// marker path and the marker-less fallback use it.
+func (d *Detector) isQuiet(current, lastOutput string, lastChange time.Time) bool {
+	return current != "" && current == lastOutput && time.Since(lastChange) >= d.cfg.QuietPeriod
 }
 
 func (d *Detector) timeout(output string) (Result, error) {
@@ -202,9 +230,9 @@ func (d *Detector) hasGlyph(output string) bool {
 // Blocked reports whether output currently shows a known blocking dialog (such
 // as the trust prompt). Callers use it to re-verify, after a post-readiness
 // pause, that no dialog has appeared in PTY output arriving since readiness was
-// detected — readiness fires on the input-ready marker, which Claude can emit
-// before a column-positioned dialog finishes rendering, so typing without this
-// re-check could send the prompt into the dialog.
+// detected — readiness fires on the marker plus a short stable window, but a
+// dialog can still finish rendering in a burst after readiness fired (during the
+// post-readiness settle pause), so the post-settle re-check remains necessary.
 func (d *Detector) Blocked(output string) bool {
 	return d.hasBlockingPrompt(output)
 }
@@ -257,6 +285,10 @@ func (c Config) withDefaults() Config {
 			"\r\n> ",
 			"│ > ",
 			"│> ",
+			// 2.1.214 editor prompt (U+276F), line-anchored so it does not
+			// raw-substring-match streamed shell text like "❯ ls".
+			"\n❯ ",
+			"\r\n❯ ",
 			"? for shortcuts",
 		}
 	} else {

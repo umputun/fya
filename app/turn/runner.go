@@ -209,8 +209,8 @@ func (r *Runner) Run(ctx context.Context, cfg Config) error {
 			return fmt.Errorf("settle before type: %w", settleErr)
 		}
 		// a column-positioned dialog (e.g. the trust prompt) can finish rendering
-		// during the settle window, after readiness fired on the input-ready
-		// marker. Re-check the fresh output so the prompt is never typed into it.
+		// during the settle window, after readiness fired (marker + stable window).
+		// Re-check the fresh output so the prompt is never typed into it.
 		if r.ready.Blocked(session.Output()) {
 			return r.finishBlocked()
 		}
