@@ -157,8 +157,8 @@ The hidden PTY means fya must infer when it is safe to type.
 
 Readiness detection checks, in order:
 
-1. The input-ready marker: Claude emits `ESC[?2004h` (bracketed-paste enable, DECSET 2004) when it switches the terminal into raw mode and starts reading input. This is the primary signal in production wiring — it is terminal protocol rather than rendered text, so it does not drift between Claude releases like the editor glyphs do, and it proves the reader is attached before fya types. While the marker is configured it also disables the glyph and quiet fallbacks below, closing a race where the editor is painted (or the output merely goes quiet) before Claude reads, so the typed/pasted prompt is dropped. This race surfaces on slow terminal transports such as a Docker Desktop VM.
-2. An editor glyph such as `\n> `, `│ > `, or `? for shortcuts`. A fallback for Claude builds that do not emit the marker; like the quiet period it is disabled while the marker is configured.
+1. The input-ready marker plus a settled output window: Claude emits `ESC[?2004h` (bracketed-paste enable, DECSET 2004) when it switches the terminal into bracketed-paste mode. This is the primary signal in production wiring — the marker's bytes are terminal protocol rather than rendered text, so they do not drift between Claude releases like the editor glyphs do. The marker alone does not prove the reader is attached, though: its timing relative to the editor actually reading input drifts across Claude releases, and Claude Code 2.1.214 emits it during startup paint, well before the editor reads. Readiness therefore fires only when the marker has been seen AND the output has stayed non-empty and unchanged for the quiet period — long enough to confirm the editor has stopped painting. The marker sighting is latched, because a long startup paint can push the early marker out of the capped PTY output buffer before the output settles, and an evicted marker must not un-see the signal. While the marker is configured it also disables the standalone glyph and quiet fallbacks below. This closes a race where a painted-but-unread editor is promoted to ready and the typed prompt is dropped, no transcript is produced, and the turn hangs to timeout — seen both on slow terminal transports such as a Docker Desktop VM and during Claude Code 2.1.214's startup paint.
+2. An editor glyph such as `\n> `, `\n❯ `, `│ > `, or `? for shortcuts`. A fallback for Claude builds that do not emit the marker; like the quiet period it is disabled while the marker is configured.
 3. Otherwise, PTY output is non-empty and unchanged for the quiet period. Disabled while the input-ready marker is configured.
 
 Blocking prompts veto every path. These are dialogs that look stable but require user input fya cannot provide, such as Claude's trust prompt. Matching is whitespace- and escape-insensitive: Claude paints dialog text by positioning the cursor between words rather than emitting literal spaces, so a raw substring match can never catch a multi-word phrase. The output and the patterns are both stripped of escape sequences and whitespace before comparison.
@@ -343,7 +343,7 @@ Important test areas:
 - CLI option splitting and forwarded flag ownership
 - stdin and stream-json prompt extraction
 - PTY lifecycle, Ctrl-C cleanup, and process-group fallback
-- readiness input-ready marker, glyph/quiet fallbacks gated behind it, whitespace/escape-insensitive blocking prompt veto, post-settle blocker re-check, and diagnostics
+- readiness input-ready marker paired with a stable output window, glyph/quiet fallbacks gated behind the marker, whitespace/escape-insensitive blocking prompt veto, post-settle blocker re-check, and diagnostics
 - typing WPM, jitter, multiline handling, and final Enter
 - transcript path encoding, prompt matching, complete-line tailing, and completion
 - Ralphex stream-json compatibility
