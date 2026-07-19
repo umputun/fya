@@ -128,11 +128,25 @@ func (c *Catalog) Select(cwd string, since time.Time, prompt string) (string, er
 	return "", ErrNoTranscript
 }
 
+// promptMatchPrefixRunes bounds the prompt prefix used as a fallback match
+// needle. It must be long enough to stay distinctive (the task header plus the
+// source URL of a typical headless prompt fall within it) yet short enough to
+// land before the source body, where paste-mode drift occurs.
+const promptMatchPrefixRunes = 256
+
 // promptForms returns the raw prompt plus JSON-string-encoded forms (minus
 // surrounding quotes) so transcripts written with JSON escaping still match.
 // Claude transcripts keep Ralphex markers as literal < and >, while json.Marshal
 // HTML-escapes them, so include a non-HTML-escaped JSON form too.
 // Duplicates (when the prompt has no characters needing escaping) are removed.
+//
+// A bounded prefix of the prompt is added as an extra set of forms. Large
+// prompts are pasted into Claude, and the terminal's paste handling can subtly
+// transform the pasted body (control/whitespace bytes in fetched source), so the
+// stored transcript copy is not byte-identical to the injected prompt. A
+// whole-prompt match then fails and Select never finds the transcript, hanging
+// the turn until turn-timeout. The prefix is injected before any drift
+// accumulates, so it stays a stable anchor and still matches.
 func (c *Catalog) promptForms(prompt string) []string {
 	if prompt == "" {
 		return nil
@@ -144,14 +158,31 @@ func (c *Catalog) promptForms(prompt string) []string {
 		}
 		forms = append(forms, form)
 	}
-	add(prompt)
-	if body, ok := c.jsonStringBody(prompt); ok {
-		add(body)
+	addEscapings := func(s string) {
+		add(s)
+		if body, ok := c.jsonStringBody(s); ok {
+			add(body)
+		}
+		if body, ok := c.jsonStringBodyNoHTML(s); ok {
+			add(body)
+		}
 	}
-	if body, ok := c.jsonStringBodyNoHTML(prompt); ok {
-		add(body)
+	addEscapings(prompt)
+	if prefix := promptMatchPrefix(prompt); prefix != prompt {
+		addEscapings(prefix)
 	}
 	return forms
+}
+
+// promptMatchPrefix returns the leading promptMatchPrefixRunes runes of prompt,
+// or the whole prompt when it is already shorter. Runes (not bytes) avoid
+// splitting a multibyte character at the cut.
+func promptMatchPrefix(prompt string) string {
+	runes := []rune(prompt)
+	if len(runes) <= promptMatchPrefixRunes {
+		return prompt
+	}
+	return string(runes[:promptMatchPrefixRunes])
 }
 
 func (c *Catalog) jsonStringBody(s string) (string, bool) {
