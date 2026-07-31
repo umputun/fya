@@ -58,6 +58,7 @@ var (
 		"agent":                              {},
 		"agents":                             {},
 		"append-system-prompt":               {},
+		"append-system-prompt-file":          {},
 		"debug-file":                         {},
 		"effort":                             {},
 		"fallback-model":                     {},
@@ -70,6 +71,7 @@ var (
 		"setting-sources":                    {},
 		"settings":                           {},
 		"system-prompt":                      {},
+		"system-prompt-file":                 {},
 	}
 	forwardOptionalValue = map[string]struct{}{
 		"debug":          {},
