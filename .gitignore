@@ -43,3 +43,6 @@ __debug_bin*
 
 # ralphex progress logs
 .ralphex/progress/
+
+# revmux review archives
+.revmux/tasks/
