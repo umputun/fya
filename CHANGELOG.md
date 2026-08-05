@@ -1,10 +1,15 @@
 # Changelog
 
-## v0.3.6 - 2026-07-18
+## v0.4.0 - 2026-08-05
+
+### New Features
+
+- Forward `--system-prompt-file` and `--append-system-prompt-file` to Claude. Claude Code accepts the system prompt either inline or from a file, but the forward allowlist carried only the inline pair, so either file variant failed fast with `unknown flag` before Claude started. The inline form rides argv and is capped by the kernel's per-string `MAX_ARG_STRLEN` of 128 KiB — a large assembled system prompt hits `E2BIG` and never runs — while the file variants have no such ceiling, so under fya there was no way to pass one.
 
 ### Bug Fixes
 
 - Require the output to settle before typing when readiness is gated on the input-ready marker, correcting the v0.3.4 gating. v0.3.4 treated the marker (`ESC[?2004h`, bracketed-paste enable) as proof the reader was attached, but on Claude Code 2.1.214 the marker fires during startup paint — roughly 800ms before the editor actually reads input — so fya typed the prompt too early, the opening characters were dropped, the stored transcript prompt no longer matched what the catalog searched for, and the turn polled to the turn timeout with no output. Readiness now requires the marker AND the output staying non-empty and unchanged for the quiet period, confirming the editor has stopped painting before fya types; this can only fire later than the old gate, never earlier, so the pre-marker quiet-only early-fire risk cannot return. The marker-less glyph fallback list is also refreshed for the 2.1.214 editor prompt (`❯`, line-anchored).
+- Strip undeliverable control characters from prompts so a raw control byte no longer wedges the turn. Prompt text is typed into Claude's interactive editor rune by rune, where a C0 byte is read as a control key rather than text — a single ESC (`0x1b`) clears the input line, the prompt is never submitted, and the turn hangs until timeout with `select transcript: context canceled`. Measurement against the live editor showed every C0 byte `0x01`-`0x1f` plus DEL `0x7f` wedging, tab failing even inside a bracketed paste, and everything at or above `U+0080` delivering literally. Prompt normalization now expands tab to four spaces alongside the existing CRLF folding, drops the remaining C0 bytes (except LF) and DEL, and warns on stderr naming the dropped code points. Sanitizing at the single input boundary keeps the injected prompt identical to the one later matched against the transcript.
 
 ## v0.3.5 - 2026-06-16
 
