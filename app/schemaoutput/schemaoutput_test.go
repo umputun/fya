@@ -59,7 +59,7 @@ func TestValidatorRejectsSchemaMismatch(t *testing.T) {
 	_, err = validate(`{"summary":7}`)
 
 	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "validate structured output: validate structured output")
+	assert.Contains(t, err.Error(), "schema validation failed")
 }
 
 func TestValidatorPreservesLargeIntegerPrecision(t *testing.T) {
