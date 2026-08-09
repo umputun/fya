@@ -6,7 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/go-pkgz/lgr v0.12.3
 	github.com/jessevdk/go-flags v1.6.1
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.11.1
 )
 
