@@ -62,6 +62,23 @@ require_cmd() {
     fi
 }
 
+# jq_text_defs extracts assistant text from message-shaped events, which is what
+# claude -p and fya both emit now, and from the legacy content_block_delta records
+# older Claude builds produced.
+jq_text_defs='
+def block_text:
+    if type == "string" then .
+    elif type == "object" and .type == "text" then (.text // empty)
+    else empty end;
+
+def texts:
+    if .type == "assistant" then
+        (.message.content // empty | if type == "array" then .[] | block_text else block_text end)
+    elif .type == "content_block_delta" and .delta.type == "text_delta" then
+        (.delta.text // empty)
+    else empty end;
+'
+
 validate_stream() {
     local name="$1"
     local file="$2"
@@ -75,10 +92,10 @@ validate_stream() {
         return 1
     fi
 
-    local deltas
-    deltas=$(jq -r 'select(.type == "content_block_delta" and .delta.type == "text_delta") | .delta.text' "$file" | wc -l | tr -d ' ')
-    if [[ "$deltas" == "0" ]]; then
-        echo "$name: no content_block_delta text events found" >&2
+    local texts
+    texts=$(jq -r "$jq_text_defs"' texts' "$file" | wc -l | tr -d ' ')
+    if [[ "$texts" == "0" ]]; then
+        echo "$name: no assistant text events found" >&2
         return 1
     fi
 
@@ -91,7 +108,7 @@ validate_stream() {
 }
 
 collect_text() {
-    jq -rs '[.[] | select(.type == "content_block_delta" and .delta.type == "text_delta") | .delta.text] | join("")' "$1"
+    jq -rs "$jq_text_defs"'[.[] | texts] | join("")' "$1"
 }
 
 result_fields() {
@@ -112,12 +129,27 @@ result_fields() {
 run_dry_check() {
     local dir="$1"
     local sample="$dir/sample.jsonl"
+    local legacy="$dir/legacy.jsonl"
     cat > "$sample" <<'EOF'
+{"type":"assistant","session_id":"dry","message":{"role":"assistant","content":[{"type":"text","text":"fya-live-parity-ok"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"dry","num_turns":1,"terminal_reason":"end_turn"}
+EOF
+    cat > "$legacy" <<'EOF'
 {"type":"content_block_delta","delta":{"type":"text_delta","text":"fya-live-parity-ok"}}
 {"type":"result","subtype":"success","is_error":false,"result":"","session_id":"dry","num_turns":1,"terminal_reason":"end_turn"}
 EOF
     validate_stream "dry-run" "$sample"
-    echo "dry-run text: $(collect_text "$sample")"
+    validate_stream "dry-run legacy" "$legacy"
+
+    local sample_text legacy_text
+    sample_text=$(collect_text "$sample")
+    legacy_text=$(collect_text "$legacy")
+    if [[ "$sample_text" != "$legacy_text" ]]; then
+        echo "dry-run: message-shaped and legacy delta text differ" >&2
+        return 1
+    fi
+
+    echo "dry-run text: $sample_text"
     echo "dry-run result fields: $(result_fields "$sample")"
 }
 
