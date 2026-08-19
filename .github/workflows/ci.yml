@@ -32,6 +32,12 @@ jobs:
       - name: build
         run: make build
 
+      - name: verify embedded revision
+        run: |
+          revision=$(.bin/fya --version | head -1)
+          echo "$revision"
+          echo "$revision" | grep -Eq -- '-[0-9]{8}T[0-9]{6}$'
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
