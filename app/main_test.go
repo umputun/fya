@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"testing"
@@ -259,6 +260,30 @@ func TestExecuteInvalidFlag(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown flag")
+}
+
+// subprocessEnv marks the re-executed child process that runs main() with an
+// invalid flag so the parent can assert how the parse error is routed.
+const subprocessEnv = "FYA_TEST_INVALID_FLAG_SUBPROCESS"
+
+func TestMainParseErrorGoesToStderrOnly(t *testing.T) {
+	if os.Getenv(subprocessEnv) == "1" {
+		os.Args = []string{"fya", "--bad-flag"}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainParseErrorGoesToStderrOnly$")
+	cmd.Env = append(os.Environ(), subprocessEnv+"=1")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+	assert.Empty(t, stdout.String(), "stdout is the JSONL channel and must stay clean on a parse error")
+	assert.Contains(t, stderr.String(), "unknown flag: --bad-flag")
 }
 
 func TestSetupLog(_ *testing.T) {
