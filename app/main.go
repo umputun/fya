@@ -85,6 +85,10 @@ type request struct {
 }
 
 func main() {
+	// route logging to stderr before options are parsed: a parse failure is reported
+	// through lgr, and stdout is the JSONL channel consumed by orchestrators
+	setupLog(false)
+
 	req := request{
 		Args:    os.Args[1:],
 		Stdin:   os.Stdin,

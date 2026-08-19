@@ -2,7 +2,7 @@
 TAG=$(shell git describe --tags --abbrev=0 --exact-match 2>/dev/null)
 BRANCH=$(if $(TAG),$(TAG),$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null))
 HASH=$(shell git rev-parse --short=7 HEAD 2>/dev/null)
-TIMESTAMP=$(shell git log -1 --format=%ct HEAD 2>/dev/null | xargs -I{} date -u -r {} +%Y%m%dT%H%M%S)
+TIMESTAMP=$(shell TZ=UTC git log -1 --date=format-local:%Y%m%dT%H%M%S --format=%cd HEAD 2>/dev/null)
 GIT_REV=$(shell printf "%s-%s-%s" "$(BRANCH)" "$(HASH)" "$(TIMESTAMP)")
 REV=$(if $(filter --,$(GIT_REV)),latest,$(GIT_REV))
 
