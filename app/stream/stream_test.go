@@ -30,38 +30,43 @@ func TestStreamJSONEvents(t *testing.T) {
 	assert.Equal(t, "s1", final["session_id"])
 }
 
-func TestStreamJSONTrimsLineSuffixColon(t *testing.T) {
+func TestStreamJSONKeepsLineSuffixColon(t *testing.T) {
 	var out bytes.Buffer
 	w := NewWriter(&out, Config{Format: FormatStreamJSON, SessionID: "s1"})
 
 	require.NoError(t, w.Text("Now I'll make the changes:\nkey: value\nCommitting:  "))
+	require.NoError(t, w.Text(":"))
 	require.NoError(t, w.Final(Result{}))
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	require.Len(t, lines, 2)
+	require.Len(t, lines, 3)
 	first := decodeLine(t, lines[0])
-	assert.Equal(t, "Now I'll make the changes\nkey: value\nCommitting", textFromEvent(t, first))
-	final := decodeLine(t, lines[1])
-	assert.Equal(t, "Now I'll make the changes\nkey: value\nCommitting", final["result"])
+	assert.Equal(t, "Now I'll make the changes:\nkey: value\nCommitting:  ", textFromEvent(t, first))
+	second := decodeLine(t, lines[1])
+	assert.Equal(t, ":", textFromEvent(t, second))
+	final := decodeLine(t, lines[2])
+	assert.Equal(t, "Now I'll make the changes:\nkey: value\nCommitting:  :", final["result"])
 }
 
-func TestStreamJSONEventTrimsLineSuffixColon(t *testing.T) {
+func TestStreamJSONEventKeepsLineSuffixColon(t *testing.T) {
+	answer := "Here is the compose file:\ndeploy:\n  replicas: 2\nand the guard:\ndef ready():\n    return True\n"
+	msg, err := json.Marshal(map[string]any{
+		"role":    "assistant",
+		"content": []map[string]string{{"type": "text", "text": answer}},
+	})
+	require.NoError(t, err)
+
 	var out bytes.Buffer
 	w := NewWriter(&out, Config{Format: FormatStreamJSON})
-
-	require.NoError(t, w.Event(Event{
-		Type:      "assistant",
-		SessionID: "s2",
-		Message:   json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":"Hg:\nkey: value"}]}`),
-	}))
+	require.NoError(t, w.Event(Event{Type: "assistant", SessionID: "s2", Message: msg}))
 	require.NoError(t, w.Final(Result{}))
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	require.Len(t, lines, 2)
 	first := decodeLine(t, lines[0])
-	assert.Equal(t, "Hg\nkey: value", textFromEvent(t, first))
+	assert.Equal(t, answer, textFromEvent(t, first))
 	final := decodeLine(t, lines[1])
-	assert.Equal(t, "Hg\nkey: value", final["result"])
+	assert.Equal(t, answer, final["result"])
 }
 
 func TestStreamJSONEventPassthrough(t *testing.T) {

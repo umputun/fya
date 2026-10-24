@@ -72,12 +72,8 @@ func (w *Writer) Text(delta string) error {
 	}
 	switch w.cfg.Format {
 	case FormatStreamJSON:
-		display := w.trimLineSuffixColon(delta)
-		if display == "" {
-			return nil
-		}
-		w.text.WriteString(display)
-		return w.writeTextEvent(display)
+		w.text.WriteString(delta)
+		return w.writeTextEvent(delta)
 	case FormatText, FormatJSON:
 		w.text.WriteString(delta)
 		return nil
@@ -92,7 +88,7 @@ func (w *Writer) Event(event Event) error {
 	if len(event.Message) == 0 {
 		return nil
 	}
-	if event.Type == "assistant" && w.cfg.Format != FormatStreamJSON {
+	if event.Type == "assistant" {
 		w.text.WriteString(messageText(event.Message))
 	}
 	if w.cfg.Format != FormatStreamJSON {
@@ -101,10 +97,6 @@ func (w *Writer) Event(event Event) error {
 	var msg any
 	if err := json.Unmarshal(event.Message, &msg); err != nil {
 		return fmt.Errorf("parse stream message: %w", err)
-	}
-	if event.Type == "assistant" {
-		w.trimLineSuffixColonInMessage(msg)
-		w.text.WriteString(w.messageTextFromValue(msg))
 	}
 	obj := map[string]any{"type": event.Type, "message": msg}
 	if event.SessionID != "" {
@@ -170,14 +162,6 @@ func messageText(raw json.RawMessage) string {
 	return contentText(msg.Content)
 }
 
-func (w *Writer) messageTextFromValue(msg any) string {
-	m, ok := msg.(map[string]any)
-	if !ok {
-		return ""
-	}
-	return contentText(m["content"])
-}
-
 func contentText(content any) string {
 	switch v := content.(type) {
 	case string:
@@ -196,45 +180,6 @@ func contentText(content any) string {
 	default:
 		return ""
 	}
-}
-
-func (w *Writer) trimLineSuffixColonInMessage(msg any) {
-	m, ok := msg.(map[string]any)
-	if !ok {
-		return
-	}
-	switch content := m["content"].(type) {
-	case string:
-		m["content"] = w.trimLineSuffixColon(content)
-	case []any:
-		for _, item := range content {
-			block, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if text, ok := block["text"].(string); ok {
-				block["text"] = w.trimLineSuffixColon(text)
-			}
-		}
-	}
-}
-
-func (w *Writer) trimLineSuffixColon(text string) string {
-	lines := strings.SplitAfter(text, "\n")
-	for i, line := range lines {
-		ending := ""
-		body := line
-		if strings.HasSuffix(body, "\n") {
-			ending = "\n"
-			body = strings.TrimSuffix(body, "\n")
-		}
-		trimmed := strings.TrimRight(body, " \t")
-		if !strings.HasSuffix(trimmed, ":") {
-			continue
-		}
-		lines[i] = strings.TrimSuffix(trimmed, ":") + ending
-	}
-	return strings.Join(lines, "")
 }
 
 func (w *Writer) writeText(text string) error {
