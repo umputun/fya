@@ -387,7 +387,7 @@ func (s *splitter) recordSessionID(name, value string) error {
 		return nil
 	}
 	if value == "" {
-		return errors.New("session-id requires a non-empty value")
+		return errors.New("flag --session-id requires a non-empty value")
 	}
 	s.sessionID = value
 	return nil
@@ -429,7 +429,7 @@ func (s *splitter) splitShort(i int) (int, error) {
 		s.claude = append(s.claude, arg)
 		return i, nil
 	case "-d", "-r", "-w":
-		s.sessionFromClaude = s.sessionFromClaude || arg != "-d"
+		s.sessionFromClaude = s.sessionFromClaude || arg == "-r" || arg == "-w"
 		s.claude = append(s.claude, arg)
 		if i+1 >= len(s.args) || s.isFlag(s.args[i+1]) {
 			return i, nil

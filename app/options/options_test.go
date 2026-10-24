@@ -216,6 +216,9 @@ func TestParseSessionFlags(t *testing.T) {
 		wantClaudeArgs []string
 	}{
 		{name: "none", args: []string{"prompt"}},
+		{name: "debug short", args: []string{"-d", "api", "prompt"}, wantClaudeArgs: []string{"-d", "api"}},
+		{name: "debug long", args: []string{"--debug=api", "prompt"}, wantClaudeArgs: []string{"--debug=api"}},
+		{name: "verbose short", args: []string{"-v", "prompt"}, wantClaudeArgs: []string{"-v"}},
 		{name: "session id separate", args: []string{"--session-id", id, "prompt"}, wantSessionID: id, wantClaudeArgs: []string{"--session-id", id}},
 		{name: "session id equals", args: []string{"--session-id=" + id, "prompt"}, wantSessionID: id, wantClaudeArgs: []string{"--session-id=" + id}},
 		{name: "continue long", args: []string{"--continue", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--continue"}},
@@ -250,7 +253,7 @@ func TestParseSessionFlags(t *testing.T) {
 func TestParseRejectsEmptySessionID(t *testing.T) {
 	for _, args := range [][]string{{"--session-id=", "prompt"}, {"--session-id", "", "prompt"}} {
 		_, err := NewParser().Parse(args)
-		require.EqualError(t, err, "session-id requires a non-empty value")
+		require.EqualError(t, err, "flag --session-id requires a non-empty value")
 	}
 }
 

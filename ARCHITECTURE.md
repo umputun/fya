@@ -52,7 +52,7 @@ Stdout is reserved for caller-visible output. Diagnostics, warnings, stack dumps
 - `app/ptyrun` starts a command inside a PTY, captures terminal output into a capped tail buffer, exposes process lifecycle methods, and performs graceful cleanup with hard-kill fallback.
 - `app/ready` detects when Claude's interactive editor is ready for typed input from PTY output.
 - `app/typing` types the prompt rune-by-rune with configurable WPM and jitter, sends multiline input without early submit, and sends the final Enter automatically.
-- `app/transcript` discovers Claude Code transcript JSONL files for the current cwd, selects the fresh transcript for the prompt, tails complete lines, parses assistant/tool/result events, exposes streamable message bodies, and decides idle completion.
+- `app/transcript` discovers Claude Code transcript JSONL files for the current cwd, selects the turn's transcript by session id or, when no id is bound, by prompt text, tails complete lines, parses assistant/tool/result events, exposes streamable message bodies, and decides idle completion.
 - `app/stream` converts transcript text, message events, and completion into Claude-compatible `text`, `json`, or `stream-json` output.
 - `app/turn` orchestrates one end-to-end turn using consumer-side interfaces and moq-generated mocks in tests.
 

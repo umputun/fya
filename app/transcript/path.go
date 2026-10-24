@@ -19,8 +19,9 @@ import (
 )
 
 // ErrNoTranscript is returned by Catalog.Select when no candidate transcript
-// matches the requested since/prompt filter. Callers may retry until a fresh
-// transcript appears (Claude can take a moment to flush the new file).
+// matches the requested since/prompt filter, and by Catalog.SelectSession while
+// <sessionID>.jsonl does not exist. Callers may retry until the transcript
+// appears (Claude can take a moment to flush the new file).
 var ErrNoTranscript = errors.New("no matching transcript found")
 
 // Catalog enumerates Claude Code transcript files for a given project working
