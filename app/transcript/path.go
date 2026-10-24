@@ -24,7 +24,7 @@ import (
 var ErrNoTranscript = errors.New("no matching transcript found")
 
 // Catalog enumerates Claude Code transcript files for a given project working
-// dir. Select is the only cross-package entry point.
+// dir. Select and SelectSession are the cross-package entry points.
 type Catalog struct {
 	root string
 }
@@ -126,6 +126,24 @@ func (c *Catalog) Select(cwd string, since time.Time, prompt string) (string, er
 		}
 	}
 	return "", ErrNoTranscript
+}
+
+// SelectSession returns the transcript Claude writes for sessionID in cwd, which Claude
+// names <sessionID>.jsonl. It returns ErrNoTranscript until that file exists, so callers
+// can retry while Claude creates it.
+func (c *Catalog) SelectSession(cwd, sessionID string) (string, error) {
+	dir, err := c.projectDir(cwd)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, sessionID+".jsonl")
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", ErrNoTranscript
+		}
+		return "", fmt.Errorf("stat transcript: %w", err)
+	}
+	return path, nil
 }
 
 // promptForms returns the raw prompt plus JSON-string-encoded forms (minus

@@ -206,6 +206,54 @@ func TestParseShortV_ForwardsToClaude(t *testing.T) {
 	assert.False(t, cfg.Version, "-v must not trigger fya's version banner")
 }
 
+func TestParseSessionFlags(t *testing.T) {
+	const id = "0f7c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+	tests := []struct {
+		name           string
+		args           []string
+		wantSessionID  string
+		wantFromClaude bool
+		wantClaudeArgs []string
+	}{
+		{name: "none", args: []string{"prompt"}},
+		{name: "session id separate", args: []string{"--session-id", id, "prompt"}, wantSessionID: id, wantClaudeArgs: []string{"--session-id", id}},
+		{name: "session id equals", args: []string{"--session-id=" + id, "prompt"}, wantSessionID: id, wantClaudeArgs: []string{"--session-id=" + id}},
+		{name: "continue long", args: []string{"--continue", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--continue"}},
+		{name: "continue short", args: []string{"-c", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"-c"}},
+		{name: "resume long", args: []string{"--resume", "abc", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--resume", "abc"}},
+		{name: "resume short", args: []string{"-r", "abc", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"-r", "abc"}},
+		{name: "fork session", args: []string{"--fork-session", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--fork-session"}},
+		{name: "from pr", args: []string{"--from-pr=12", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--from-pr=12"}},
+		{name: "worktree long", args: []string{"--worktree=wt", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"--worktree=wt"}},
+		{name: "worktree short", args: []string{"-w", "--", "prompt"}, wantFromClaude: true, wantClaudeArgs: []string{"-w"}},
+		{
+			name:           "session id with fork",
+			args:           []string{"--resume", "abc", "--fork-session", "--session-id", id, "--", "prompt"},
+			wantSessionID:  id,
+			wantFromClaude: true,
+			wantClaudeArgs: []string{"--resume", "abc", "--fork-session", "--session-id", id},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := NewParser().Parse(tt.args)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantSessionID, cfg.SessionID)
+			assert.Equal(t, tt.wantFromClaude, cfg.SessionFromClaude)
+			assert.Equal(t, tt.wantClaudeArgs, cfg.ClaudeArgs)
+		})
+	}
+}
+
+func TestParseRejectsEmptySessionID(t *testing.T) {
+	for _, args := range [][]string{{"--session-id=", "prompt"}, {"--session-id", "", "prompt"}} {
+		_, err := NewParser().Parse(args)
+		require.EqualError(t, err, "session-id requires a non-empty value")
+	}
+}
+
 func TestParseDoubleDashPrompt(t *testing.T) {
 	cfg, err := NewParser().Parse([]string{"--print", "--", "--not-a-flag", "prompt"})
 

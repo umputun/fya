@@ -226,7 +226,9 @@ The cwd is encoded by replacing every non-letter/digit rune with `-`. Example:
 -> -Users-me-dev-fya
 ```
 
-Transcript selection:
+Session binding: a fresh run gets a generated UUIDv4 passed to the child as `--session-id`, and a caller's own `--session-id` is used the same way. Claude names the transcript `<session-id>.jsonl`, so `Catalog.SelectSession` waits for that exact file and concurrent runs in one cwd cannot pick up each other's transcript. Claude refuses a session id already in use and exits before the prompt is typed. Runs with `--resume`/`-r`, `--continue`/`-c`, `--fork-session`, `--from-pr` or `--worktree`/`-w` let Claude choose or relocate the session, so fya injects no id and falls back to the prompt search below.
+
+Prompt-search selection, used only when no session id is bound:
 
 - lists `.jsonl` files for the cwd project directory
 - treats a missing directory as retryable

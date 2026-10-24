@@ -17,6 +17,9 @@ import (
 //			SelectFunc: func(cwd string, since time.Time, prompt string) (string, error) {
 //				panic("mock out the Select method")
 //			},
+//			SelectSessionFunc: func(cwd string, sessionID string) (string, error) {
+//				panic("mock out the SelectSession method")
+//			},
 //		}
 //
 //		// use mockedCatalog in code that requires turn.Catalog
@@ -26,6 +29,9 @@ import (
 type CatalogMock struct {
 	// SelectFunc mocks the Select method.
 	SelectFunc func(cwd string, since time.Time, prompt string) (string, error)
+
+	// SelectSessionFunc mocks the SelectSession method.
+	SelectSessionFunc func(cwd string, sessionID string) (string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -38,8 +44,16 @@ type CatalogMock struct {
 			// Prompt is the prompt argument value.
 			Prompt string
 		}
+		// SelectSession holds details about calls to the SelectSession method.
+		SelectSession []struct {
+			// Cwd is the cwd argument value.
+			Cwd string
+			// SessionID is the sessionID argument value.
+			SessionID string
+		}
 	}
-	lockSelect sync.RWMutex
+	lockSelect        sync.RWMutex
+	lockSelectSession sync.RWMutex
 }
 
 // Select calls SelectFunc.
@@ -79,5 +93,41 @@ func (mock *CatalogMock) SelectCalls() []struct {
 	mock.lockSelect.RLock()
 	calls = mock.calls.Select
 	mock.lockSelect.RUnlock()
+	return calls
+}
+
+// SelectSession calls SelectSessionFunc.
+func (mock *CatalogMock) SelectSession(cwd string, sessionID string) (string, error) {
+	if mock.SelectSessionFunc == nil {
+		panic("CatalogMock.SelectSessionFunc: method is nil but Catalog.SelectSession was just called")
+	}
+	callInfo := struct {
+		Cwd       string
+		SessionID string
+	}{
+		Cwd:       cwd,
+		SessionID: sessionID,
+	}
+	mock.lockSelectSession.Lock()
+	mock.calls.SelectSession = append(mock.calls.SelectSession, callInfo)
+	mock.lockSelectSession.Unlock()
+	return mock.SelectSessionFunc(cwd, sessionID)
+}
+
+// SelectSessionCalls gets all the calls that were made to SelectSession.
+// Check the length with:
+//
+//	len(mockedCatalog.SelectSessionCalls())
+func (mock *CatalogMock) SelectSessionCalls() []struct {
+	Cwd       string
+	SessionID string
+} {
+	var calls []struct {
+		Cwd       string
+		SessionID string
+	}
+	mock.lockSelectSession.RLock()
+	calls = mock.calls.SelectSession
+	mock.lockSelectSession.RUnlock()
 	return calls
 }

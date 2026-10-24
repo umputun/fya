@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"syscall"
 
 	log "github.com/go-pkgz/lgr"
@@ -167,8 +169,9 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		Options:                  cfg,
 		ValidateStructuredOutput: validateStructuredOutput,
 	}
+	claudeArgs, sessionID := childSession(cfg)
 	if err := req.Factory(runnerReq).Run(ctx, turn.Config{
-		ClaudeArgs:        cfg.ClaudeArgs,
+		ClaudeArgs:        claudeArgs,
 		CWD:               cfg.CWD,
 		TurnTimeout:       cfg.TurnTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
@@ -176,10 +179,35 @@ func run(ctx context.Context, cfg options.Config, req request) error {
 		StreamEvents:      cfg.OutputFormat == stream.FormatStreamJSON,
 		Prompt:            prompt,
 		TypeSettle:        cfg.TypeSettle,
+		SessionID:         sessionID,
 	}); err != nil {
 		return fmt.Errorf("run turn: %w", err)
 	}
 	return nil
+}
+
+// childSession returns the Claude args and the session id to select the transcript by.
+// A fresh run gets a generated --session-id, so concurrent runs in one cwd cannot read each
+// other's transcript. Flags that let Claude choose the session leave the id empty and keep
+// the prompt search.
+func childSession(cfg options.Config) (args []string, sessionID string) {
+	if cfg.SessionFromClaude {
+		return cfg.ClaudeArgs, ""
+	}
+	if cfg.SessionID != "" {
+		return cfg.ClaudeArgs, cfg.SessionID
+	}
+	id := newSessionID()
+	return slices.Concat(cfg.ClaudeArgs, []string{"--session-id", id}), id
+}
+
+// newSessionID returns a random version 4 UUID, the only form Claude accepts for --session-id.
+func newSessionID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func stdinHasData(r io.Reader) bool {

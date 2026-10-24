@@ -65,7 +65,7 @@ Recommended probe shape:
 
 Check for expected clean signals:
 
-- child argv should be `["claude"]`
+- child argv should be `["claude", "--session-id", "<generated uuid>"]` for a run without session flags
 - child stdin/stdout/stderr should be TTYs
 - child cwd/PWD should match the requested cwd
 - prompt input should be the prompt text plus final newline only
