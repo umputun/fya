@@ -73,6 +73,51 @@ func TestRunnerSuccess(t *testing.T) {
 	assert.Len(t, session.WaitCalls(), 1)
 }
 
+func TestRunnerSelectsTranscriptBySessionID(t *testing.T) {
+	session := newSessionMock()
+	output := &mocks.OutputMock{
+		TextFunc:  func(string) error { return nil },
+		FinalFunc: func(stream.Result) error { return nil },
+	}
+	catalog := &mocks.CatalogMock{}
+	catalog.SelectSessionFunc = func(string, string) (string, error) {
+		if len(catalog.SelectSessionCalls()) == 1 {
+			return "", transcript.ErrNoTranscript
+		}
+		return "sid.jsonl", nil
+	}
+	runner := turn.NewRunner(turn.Dependencies{
+		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {
+			return session, nil
+		}},
+		Readiness: &mocks.ReadinessMock{WaitFunc: func(context.Context, ready.Source) (ready.Result, error) {
+			return ready.Result{Ready: true}, nil
+		}},
+		Injector: &mocks.InjectorMock{TypeFunc: func(context.Context, io.Writer, string) error { return nil }},
+		Catalog:  catalog,
+		TailerFactory: func(path string) turn.Tailer {
+			assert.Equal(t, "sid.jsonl", path)
+			return &mocks.TailerMock{ReadNewFunc: func() ([]transcript.Event, bool, error) {
+				return []transcript.Event{{Text: "answer", Result: true, SessionID: "sid"}}, true, nil
+			}}
+		},
+		Output: output,
+	})
+
+	err := runner.Run(t.Context(), turn.Config{
+		CWD: "work", TurnTimeout: time.Minute, Prompt: "hello", SessionID: "sid", PollPeriod: time.Millisecond,
+	})
+
+	require.NoError(t, err)
+	calls := catalog.SelectSessionCalls()
+	require.Len(t, calls, 2)
+	assert.Equal(t, "work", calls[1].Cwd)
+	assert.Equal(t, "sid", calls[1].SessionID)
+	assert.Empty(t, catalog.SelectCalls())
+	require.Len(t, output.FinalCalls(), 1)
+	assert.Equal(t, "sid", output.FinalCalls()[0].Result.SessionID)
+}
+
 func TestRunnerStartFailure(t *testing.T) {
 	runner := turn.NewRunner(turn.Dependencies{
 		ProcessStarter: &mocks.ProcessStarterMock{StartFunc: func(context.Context, ptyrun.Config) (turn.Session, error) {

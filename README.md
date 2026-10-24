@@ -145,6 +145,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the PTY flow, transcript tailing, rea
 - `stream-json` emits Claude-style `assistant`/`user` message events from the transcript plus one final `result` containing the accumulated assistant answer. fya relays native message-shaped events and does not synthesize `tool:` text progress.
 - Multi-turn `--input-format=stream-json` history is outside the one-shot design. Exactly one user message is accepted.
 - `--json-schema` is v1-only structured-output compatibility for `--output-format=json` with text input; it has no stream-json schema mode and no automatic retry.
+- fya starts fresh sessions with a generated `--session-id` so concurrent runs in one directory read only their own transcript. Runs with `--resume`, `--continue`, `--fork-session`, `--from-pr` or `--worktree` still find the transcript by prompt text, and overlapping runs of that kind in one directory can pick up each other's answer.
 - Live parity and downstream-integration smoke checks are manual because they call Claude and consume quota.
 
 ## Development

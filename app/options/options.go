@@ -94,6 +94,15 @@ var (
 		"plugin-url":       {},
 		"tools":            {},
 	}
+	// sessionFromClaude lists forwarded flags that let Claude choose or relocate the session
+	// transcript, so fya cannot know the transcript path from a session id in advance.
+	sessionFromClaude = map[string]struct{}{
+		"continue":     {},
+		"fork-session": {},
+		"from-pr":      {},
+		"resume":       {},
+		"worktree":     {},
+	}
 )
 
 // Config is the parsed fya CLI configuration after splitting wrapper flags,
@@ -117,6 +126,11 @@ type Config struct {
 	Version            bool
 	ClaudeArgs         []string
 	PromptArgs         []string
+	// SessionID is the caller's forwarded --session-id value, empty when none was given.
+	SessionID string
+	// SessionFromClaude is set when a forwarded flag (resume, continue, fork, from-pr,
+	// worktree) lets Claude choose or relocate the session transcript.
+	SessionFromClaude bool
 }
 
 type rawOptions struct {
@@ -193,6 +207,8 @@ func (p *Parser) Parse(args []string) (Config, error) {
 		Version:            raw.Version,
 		ClaudeArgs:         split.claudeArgs,
 		PromptArgs:         split.promptArgs,
+		SessionID:          split.sessionID,
+		SessionFromClaude:  split.sessionFromClaude,
 	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -249,6 +265,8 @@ type splitResult struct {
 	claudeArgs         []string
 	promptArgs         []string
 	jsonSchemaExplicit bool
+	sessionID          string
+	sessionFromClaude  bool
 }
 
 type splitter struct {
@@ -256,6 +274,8 @@ type splitter struct {
 	claude             []string
 	prompt             []string
 	jsonSchemaExplicit bool
+	sessionID          string
+	sessionFromClaude  bool
 }
 
 func newSplitter(args []string) *splitter {
@@ -291,11 +311,16 @@ func (s *splitter) split() (splitResult, error) {
 		claudeArgs:         s.claude,
 		promptArgs:         s.prompt,
 		jsonSchemaExplicit: s.jsonSchemaExplicit,
+		sessionID:          s.sessionID,
+		sessionFromClaude:  s.sessionFromClaude,
 	}, nil
 }
 
 func (s *splitter) splitLong(i int) (int, error) {
 	name, hasValue := s.longName(s.args[i])
+	if s.has(sessionFromClaude, name) {
+		s.sessionFromClaude = true
+	}
 	switch {
 	case s.has(consumedBool, name):
 		return s.skipLongBool(name, hasValue, i)
@@ -345,13 +370,27 @@ func (s *splitter) appendLongBool(name string, hasValue bool, i int) (int, error
 func (s *splitter) appendLongValue(name string, hasValue bool, i int) (int, error) {
 	if hasValue {
 		s.claude = append(s.claude, s.args[i])
-		return i, nil
+		_, value, _ := strings.Cut(s.args[i], "=")
+		return i, s.recordSessionID(name, value)
 	}
 	if i+1 >= len(s.args) || s.isFlag(s.args[i+1]) {
 		return 0, fmt.Errorf("flag --%s requires a value", name)
 	}
 	s.claude = append(s.claude, s.args[i], s.args[i+1])
-	return i + 1, nil
+	return i + 1, s.recordSessionID(name, s.args[i+1])
+}
+
+// recordSessionID keeps the caller's --session-id. An empty id is rejected because fya
+// would otherwise treat it as absent and give the child a second --session-id.
+func (s *splitter) recordSessionID(name, value string) error {
+	if name != "session-id" {
+		return nil
+	}
+	if value == "" {
+		return errors.New("flag --session-id requires a non-empty value")
+	}
+	s.sessionID = value
+	return nil
 }
 
 func (s *splitter) appendLongOptionalValue(hasValue bool, i int) (int, error) {
@@ -386,9 +425,11 @@ func (s *splitter) splitShort(i int) (int, error) {
 		return i, nil
 	case "-v", "-c":
 		// -v belongs to Claude, not fya version output; -c is Claude continue.
+		s.sessionFromClaude = s.sessionFromClaude || arg == "-c"
 		s.claude = append(s.claude, arg)
 		return i, nil
 	case "-d", "-r", "-w":
+		s.sessionFromClaude = s.sessionFromClaude || arg == "-r" || arg == "-w"
 		s.claude = append(s.claude, arg)
 		if i+1 >= len(s.args) || s.isFlag(s.args[i+1]) {
 			return i, nil

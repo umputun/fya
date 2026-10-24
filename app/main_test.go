@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"testing"
 	"time"
@@ -201,6 +202,58 @@ func TestExecuteForwardsClaudeArgs(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "turn failed")
+}
+
+func TestExecuteBindsChildSession(t *testing.T) {
+	const id = "0f7c1d2e-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+	tests := []struct {
+		name          string
+		args          []string
+		wantArgs      []string
+		wantSessionID string
+	}{
+		{name: "caller session id", args: []string{"--session-id", id, "hello"}, wantArgs: []string{"--session-id", id}, wantSessionID: id},
+		{name: "resume", args: []string{"--resume", "abc", "hello"}, wantArgs: []string{"--resume", "abc"}},
+		{name: "continue", args: []string{"-c", "hello"}, wantArgs: []string{"-c"}},
+		{name: "worktree", args: []string{"--worktree=wt", "hello"}, wantArgs: []string{"--worktree=wt"}},
+		{
+			name:     "fork with caller session id",
+			args:     []string{"--resume", "abc", "--fork-session", "--session-id", id, "hello"},
+			wantArgs: []string{"--resume", "abc", "--fork-session", "--session-id", id},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got turn.Config
+			var stdout, stderr bytes.Buffer
+
+			err := execute(t.Context(), testRequest(testReq{args: tt.args, stdout: &stdout, stderr: &stderr, factory: captureConfigFactory(&got)}))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantArgs, got.ClaudeArgs)
+			assert.Equal(t, tt.wantSessionID, got.SessionID)
+		})
+	}
+}
+
+func TestExecuteGeneratesSessionIDForFreshRun(t *testing.T) {
+	uuidV4 := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	ids := map[string]bool{}
+	for range 2 {
+		var got turn.Config
+		var stdout, stderr bytes.Buffer
+
+		err := execute(t.Context(), testRequest(testReq{
+			args: []string{"--verbose", "hello"}, stdout: &stdout, stderr: &stderr, factory: captureConfigFactory(&got),
+		}))
+
+		require.NoError(t, err)
+		assert.Regexp(t, uuidV4, got.SessionID)
+		assert.Equal(t, []string{"--verbose", "--session-id", got.SessionID}, got.ClaudeArgs)
+		ids[got.SessionID] = true
+	}
+	assert.Len(t, ids, 2)
 }
 
 func TestExecutePromptReturnsTurnError(t *testing.T) {

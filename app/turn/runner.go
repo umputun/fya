@@ -68,9 +68,11 @@ type Injector interface {
 	Type(context.Context, io.Writer, string) error
 }
 
-// Catalog locates the transcript JSONL file Claude is writing for the current cwd.
+// Catalog locates the transcript JSONL file Claude is writing for the current cwd:
+// SelectSession by a known session id, Select by start time and prompt text.
 type Catalog interface {
 	Select(cwd string, since time.Time, prompt string) (string, error)
+	SelectSession(cwd, sessionID string) (string, error)
 }
 
 // Tailer reads transcript records across successive polls. ReadNew returns
@@ -106,6 +108,9 @@ type Config struct {
 	// margin on top of the readiness gate for environments (e.g. a Docker Desktop
 	// VM) whose terminal I/O lags behind the input-ready marker. Zero disables it.
 	TypeSettle time.Duration
+	// SessionID is the session id the child Claude was started with. When set, the
+	// transcript is selected by that id instead of by start time and prompt text.
+	SessionID string
 }
 
 // Runner orchestrates a single Claude PTY turn through the injected dependencies.
@@ -241,16 +246,21 @@ func (r *Runner) cleanupSession(session Session) {
 	}
 }
 
-// selectTranscript polls catalog.Select until a transcript modified after
-// StartedAt and containing the prompt appears, ctx is canceled, or Claude
-// exits. Claude can take a moment to flush a new transcript so the loop
-// tolerates ErrNoTranscript; watching sessionDone prevents a 30-minute wait if
-// Claude crashed between typing and the first transcript flush.
+// selectTranscript polls the catalog until the turn's transcript appears, ctx is
+// canceled, or Claude exits. Claude can take a moment to flush a new transcript
+// so the loop tolerates ErrNoTranscript; watching sessionDone prevents a
+// 30-minute wait if Claude crashed between typing and the first transcript flush.
 func (r *Runner) selectTranscript(ctx context.Context, cfg Config, sessionDone <-chan struct{}) (string, error) {
 	ticker := time.NewTicker(cfg.PollPeriod)
 	defer ticker.Stop()
 	for {
-		path, err := r.catalog.Select(cfg.CWD, cfg.StartedAt, cfg.Prompt)
+		var path string
+		var err error
+		if cfg.SessionID != "" {
+			path, err = r.catalog.SelectSession(cfg.CWD, cfg.SessionID)
+		} else {
+			path, err = r.catalog.Select(cfg.CWD, cfg.StartedAt, cfg.Prompt)
+		}
 		if err == nil {
 			return path, nil
 		}

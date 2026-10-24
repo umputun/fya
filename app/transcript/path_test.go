@@ -106,6 +106,62 @@ func TestCatalogSelectMissingProjectDirIsErrNoTranscript(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoTranscript)
 }
 
+func TestCatalogSelectSession(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	ownPath := filepath.Join(dir, "own-id.jsonl")
+	siblingPath := filepath.Join(dir, "sibling-id.jsonl")
+	require.NoError(t, os.WriteFile(ownPath, []byte("other text"), 0o600))
+	require.NoError(t, os.WriteFile(siblingPath, []byte("target prompt"), 0o600))
+	now := time.Now()
+	require.NoError(t, os.Chtimes(ownPath, now.Add(-time.Hour), now.Add(-time.Hour)))
+
+	got, err := cat.SelectSession(cwd, "own-id")
+
+	require.NoError(t, err)
+	assert.Equal(t, ownPath, got)
+}
+
+func TestCatalogSelectSessionMissingIsErrNoTranscript(t *testing.T) {
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+
+	_, err := cat.SelectSession(cwd, "own-id")
+	require.ErrorIs(t, err, ErrNoTranscript)
+
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sibling-id.jsonl"), []byte("target prompt"), 0o600))
+
+	_, err = cat.SelectSession(cwd, "own-id")
+	assert.ErrorIs(t, err, ErrNoTranscript)
+}
+
+func TestCatalogSelectSessionStatError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	root := t.TempDir()
+	cwd := t.TempDir()
+	cat := NewCatalog(root)
+	dir, err := cat.projectDir(cwd)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.Chmod(dir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	_, err = cat.SelectSession(cwd, "own-id")
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoTranscript)
+}
+
 // prompts containing JSON-escapable characters (newlines, quotes, backslashes)
 // must still match — Claude stores them as JSON-encoded strings in the
 // transcript, so a raw search would miss valid candidates.
